@@ -1,0 +1,255 @@
+html {
+  font-size: 16px;
+}
+
+body {
+  font-size: 16px;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.brand-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  font-size: 24px;
+}
+
+h3 {
+  font-size: 20px;
+}
+
+p,
+a,
+span,
+li,
+label,
+input,
+textarea,
+select,
+button {
+  font-size: 15px;
+}
+
+.navbar {
+  height: 100px !important;
+  gap: 32px !important;
+}
+
+.nav-location,
+.nav-location span,
+.nav-item,
+.nav-item span,
+.nav-item strong {
+  font-size: 19px !important;
+  line-height: 1.35 !important;
+}
+
+.nav-location {
+  gap: 12px !important;
+}
+
+.nav-location svg {
+  width: 22px !important;
+  height: 22px !important;
+}
+
+.nav-right {
+  gap: 28px !important;
+  min-width: 260px !important;
+}
+
+.nav-item {
+  gap: 12px !important;
+}
+
+.nav-item svg {
+  width: 23px !important;
+  height: 23px !important;
+}
+
+.search-box {
+  height: 64px !important;
+  border-radius: 20px !important;
+  gap: 14px !important;
+  padding: 0 20px !important;
+  border: 1.5px solid #ddd4c8 !important;
+  background: #fbfaf7 !important;
+}
+
+.search-box:hover,
+.search-box:focus-within {
+  border-color: #ccbfae !important;
+  background: #fffdf9 !important;
+  box-shadow: none !important;
+}
+
+.search-box svg {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.search-box input,
+.search-box input::placeholder {
+  font-size: 18px !important;
+}
+
+small,
+.small-text,
+.footer-bottom,
+.footer-copy,
+.field-error,
+.auth-footer,
+.restaurant-breadcrumb {
+  font-size: 14px;
+}
+
+.hero-content p,
+.section-subtitle,
+.cart-header p,
+.checkout-form-message,
+.restaurant-address,
+.food-description,
+.footer-brand-text,
+.footer-col a,
+.footer-col p,
+.footer-desc {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.restaurant-card h3,
+.food-card-body h3,
+.cart-restaurant h3,
+.checkout-card h3 {
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.restaurant-card p,
+.restaurant-card span,
+.food-price,
+.food-tag,
+.restaurant-meta,
+.cart-badge,
+.apply-btn,
+.primary-btn,
+.place-order-btn {
+  font-size: 16px;
+}
+
+.footer {
+  line-height: 1.7;
+  padding-bottom: 30px !important;
+}
+
+.footer-main,
+.footer-top {
+  row-gap: 24px !important;
+  column-gap: 40px !important;
+}
+
+.footer-brand-name {
+  font-size: 32px !important;
+}
+
+.footer-col h4 {
+  font-size: 18px !important;
+  margin-bottom: 16px !important;
+}
+
+.footer-col a,
+.footer-col p,
+.footer-bottom,
+.footer-copy,
+.auth-footer {
+  line-height: 1.7;
+}
+
+.footer-brand-text,
+.footer-desc,
+.footer-col a,
+.footer-col p {
+  font-size: 16px !important;
+}
+
+.footer-bottom,
+.footer-copy,
+.made-by {
+  font-size: 15px !important;
+}
+
+.footer-brand-top {
+  gap: 14px !important;
+  margin-bottom: 16px !important;
+}
+
+.footer-logo {
+  width: 52px !important;
+  height: 52px !important;
+}
+
+.footer-main {
+  padding: 34px 36px !important;
+}
+
+.footer-top {
+  margin-bottom: 28px !important;
+}
+
+@media (max-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+
+  h2 {
+    font-size: 22px;
+  }
+
+  h3 {
+    font-size: 19px;
+  }
+
+  .navbar {
+    height: auto !important;
+  }
+
+  .nav-location,
+  .nav-location span,
+  .nav-item,
+  .nav-item span,
+  .nav-item strong {
+    font-size: 17px !important;
+  }
+
+  .nav-location svg,
+  .nav-item svg,
+  .search-box svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .search-box input,
+  .search-box input::placeholder {
+    font-size: 17px !important;
+  }
+
+}

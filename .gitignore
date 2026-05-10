@@ -1,0 +1,50 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor settings
+.vscode/
+.idea/
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+
+# Logs
+*.log
+logs/
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+config.local.php
+settings.local.php
+
+# Dependency directories
+vendor/
+node_modules/
+
+# Build and cache artifacts
+dist/
+build/
+coverage/
+.cache/
+.phpunit.result.cache
+
+# XAMPP / PHP temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+.codex-temp-edge/
+admin/.codex-temp-edge/
+
+# Archives and exports
+*.zip
+*.tar
+*.gz
+*.sql.gz
