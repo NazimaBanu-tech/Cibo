@@ -11,6 +11,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 
 cibo_json_response([
     'success' => true,
-    'restaurants' => cibo_catalog_fetch_restaurants(),
+    'restaurants' => cibo_catalog_fetch_restaurants((string) ($_GET['location'] ?? '')),
     'menu_items' => cibo_catalog_fetch_menu_items(),
 ]);

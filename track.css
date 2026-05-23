@@ -1,0 +1,125 @@
+.track-card.is-cinematic {
+  position: relative;
+  overflow: hidden;
+}
+
+.track-card.is-cinematic::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(146, 186, 96, 0.18), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(243, 205, 145, 0.18), transparent 24%);
+  pointer-events: none;
+}
+
+.track-status-emotion {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(207, 224, 183, 0.9);
+  color: #556246;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.track-progress-fill {
+  position: absolute;
+  top: 22px;
+  left: 12%;
+  width: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7da35c, #b6cf8c);
+  box-shadow: 0 0 18px rgba(125, 163, 92, 0.38);
+  z-index: 0;
+  transition: width 420ms ease;
+}
+
+.track-step {
+  transition: transform 280ms ease, opacity 280ms ease;
+}
+
+.track-step-dot {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 280ms ease,
+    box-shadow 280ms ease,
+    border-color 280ms ease,
+    background 280ms ease,
+    color 280ms ease;
+}
+
+.track-step.completed .track-step-dot::after {
+  content: none;
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+.track-step .track-step-dot::after {
+  content: none;
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.track-step.completed,
+.track-step.current {
+  opacity: 1;
+}
+
+.track-step.current {
+  transform: translateY(-4px);
+}
+
+.track-step.current .track-step-dot {
+  box-shadow: 0 0 0 8px rgba(207, 224, 183, 0.24), 0 14px 28px rgba(87, 114, 59, 0.18);
+}
+
+.track-step.current h3 {
+  text-shadow: 0 0 18px rgba(125, 163, 92, 0.22);
+}
+
+.track-step.is-upcoming {
+  opacity: 0.72;
+}
+
+.track-card.is-cancelled::after {
+  background:
+    radial-gradient(circle at top right, rgba(214, 174, 164, 0.24), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(243, 205, 145, 0.16), transparent 24%);
+}
+
+.track-card.is-cancelled .track-progress-fill {
+  width: 0 !important;
+  opacity: 0;
+}
+
+.track-card.is-cancelled .track-status-emotion {
+  border-color: rgba(216, 177, 165, 0.9);
+  color: #7b4c3f;
+}
+
+.track-card.is-cancelled .track-step.current {
+  transform: none;
+}
+
+.track-card.is-cancelled .track-step.current .track-step-dot {
+  background: #fbefea;
+  border-color: #e4bdb1;
+  color: #b05a44;
+  box-shadow: 0 0 0 8px rgba(228, 189, 177, 0.22), 0 14px 28px rgba(128, 72, 58, 0.16);
+}
+
+.track-card.is-cancelled .track-step.current h3 {
+  color: #b05a44;
+  text-shadow: none;
+}
+
+.track-card.is-cancelled .track-step.completed .track-step-dot::after {
+  content: none;
+  opacity: 0;
+}

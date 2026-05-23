@@ -229,7 +229,7 @@ function cibo_register_user(string $name, string $email, string $password, strin
     $db = cibo_app_db();
 
     if (!$db) {
-        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db connection.', 500);
+        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
     }
 
     $existingUser = cibo_find_user_by_email($email);
@@ -286,7 +286,7 @@ function cibo_attempt_user_login(string $email, string $password): array
     $db = cibo_app_db();
 
     if (!$db) {
-        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db connection.', 500);
+        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
     }
 
     $user = cibo_find_user_by_email($email, true);
@@ -296,4 +296,68 @@ function cibo_attempt_user_login(string $email, string $password): array
     }
 
     return cibo_user_login($user);
+}
+
+function cibo_reset_user_password(string $email, string $phone, string $newPassword): void
+{
+    $email = strtolower(trim($email));
+    $phone = cibo_normalize_phone_value($phone);
+    $newPassword = trim($newPassword);
+
+    if ($email === '' || $phone === '' || $newPassword === '') {
+        throw new CiboHttpException('Email, phone number, and new password are required.', 422);
+    }
+
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new CiboHttpException('Please enter a valid email address.', 422);
+    }
+
+    if ($email === 'admin@cibo.local') {
+        throw new CiboHttpException('Admin access is available only in the admin portal.', 422);
+    }
+
+    if (strlen($phone) !== 10) {
+        throw new CiboHttpException('Phone number must be 10 digits.', 422);
+    }
+
+    if (strlen($newPassword) < 6) {
+        throw new CiboHttpException('Password must be at least 6 characters long.', 422);
+    }
+
+    if (strlen($newPassword) > 72) {
+        throw new CiboHttpException('Password is too long.', 422);
+    }
+
+    $db = cibo_app_db();
+
+    if (!$db) {
+        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
+    }
+
+    $user = cibo_find_user_by_email($email, true);
+
+    if (!$user || cibo_normalize_phone_value((string) ($user['phone'] ?? '')) !== $phone) {
+        throw new CiboHttpException('We could not verify that account with the provided email and phone number.', 404);
+    }
+
+    if (password_verify($newPassword, (string) ($user['password_hash'] ?? ''))) {
+        throw new CiboHttpException('Please choose a new password that is different from your current password.', 422);
+    }
+
+    $passwordHash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $statement = $db->prepare('UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1');
+
+    if (!$statement) {
+        throw new CiboHttpException('Unable to update the password right now.', 500);
+    }
+
+    $userId = (int) ($user['id'] ?? 0);
+    $statement->bind_param('si', $passwordHash, $userId);
+
+    if (!$statement->execute()) {
+        $statement->close();
+        throw new CiboHttpException('Unable to update the password right now.', 500);
+    }
+
+    $statement->close();
 }

@@ -1,12 +1,11 @@
 (() => {
-  const STORAGE_KEY = 'cibo_cart';
-  const LEGACY_STORAGE_KEY = 'ciboCart';
   const MAX_ITEM_QUANTITY = 5;
   const MAX_ORDER_ITEMS = 15;
   const ITEM_LIMIT_MESSAGE = 'Max 5 per item reached';
   const ORDER_LIMIT_MESSAGE = `Order limit reached (Max ${MAX_ORDER_ITEMS} items per order)`;
   const RESTAURANTS_KEY = 'restaurants';
   const MENU_ITEMS_KEY = 'menuItems';
+  const cartManager = window.CiboCartManager;
   const cardSelector = '.food-big-card';
   const actionSelector = '.food-action';
   const chipSelector = '.menu-chips .chip';
@@ -19,95 +18,25 @@
   const heroImage = document.querySelector('.restaurant-hero-right img');
   const foodGrid = document.querySelector('.food-grid');
   const menuChips = document.querySelector('.menu-chips');
+  const heroFallbackImage = heroImage?.dataset.heroFallback || heroImage?.getAttribute('src') || '';
 
   let cart = readCart();
-
-  function sanitizeCart(cartState) {
-    const safeCart = cartState && typeof cartState === 'object' ? cartState : {};
-    let didChange = false;
-    let totalItems = 0;
-
-    Object.keys(safeCart).forEach((itemId) => {
-      const item = safeCart[itemId];
-      let quantity = Number(item?.quantity) || 0;
-
-      if (quantity <= 0) {
-        delete safeCart[itemId];
-        didChange = true;
-        return;
-      }
-
-      if (quantity > MAX_ITEM_QUANTITY) {
-        quantity = MAX_ITEM_QUANTITY;
-        safeCart[itemId] = {
-          ...item,
-          quantity
-        };
-        didChange = true;
-      }
-
-      const remainingSlots = MAX_ORDER_ITEMS - totalItems;
-
-      if (remainingSlots <= 0) {
-        delete safeCart[itemId];
-        didChange = true;
-        return;
-      }
-
-      if (quantity > remainingSlots) {
-        quantity = remainingSlots;
-        safeCart[itemId] = {
-          ...safeCart[itemId],
-          quantity
-        };
-        didChange = true;
-      }
-
-      totalItems += quantity;
-    });
-
-    return {
-      cart: safeCart,
-      didChange
-    };
-  }
+  let restaurantModal = null;
+  let restaurantModalTitle = null;
+  let restaurantModalMessage = null;
+  let restaurantModalHint = null;
+  let restaurantModalCancelButton = null;
+  let restaurantModalConfirmButton = null;
+  let pendingRestaurantSwap = null;
+  let lastModalTrigger = null;
 
   function readCart() {
-    try {
-      const savedCart = localStorage.getItem(STORAGE_KEY);
-
-      if (savedCart) {
-        const parsedCart = JSON.parse(savedCart);
-        const { cart: safeCart, didChange } = sanitizeCart(parsedCart);
-
-        if (didChange) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(safeCart));
-        }
-
-        return safeCart;
-      }
-
-      const legacyCart = localStorage.getItem(LEGACY_STORAGE_KEY);
-
-      if (legacyCart) {
-        const parsedLegacyCart = JSON.parse(legacyCart);
-        const { cart: safeLegacyCart } = sanitizeCart(parsedLegacyCart);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(safeLegacyCart));
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-        return safeLegacyCart;
-      }
-    } catch (error) {
-      return {};
-    }
-
-    return {};
+    return cartManager ? cartManager.getCart() : {};
   }
 
-  function saveCart() {
-    const sanitizedCart = sanitizeCart(cart).cart;
-    cart = sanitizedCart;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedCart));
-    window.dispatchEvent(new Event('cibo-cart-updated'));
+  function syncLocalCart() {
+    cart = readCart();
+    return cart;
   }
 
   function readJSON(key, fallback) {
@@ -140,6 +69,83 @@
     return '\u20B9' + (Number(value) || 0).toFixed(0);
   }
 
+  function getCartItems(cartState = cart) {
+    return Object.values(cartState || {}).filter((item) => Number(item?.quantity) > 0);
+  }
+
+  function normalizeCartMutationResult(result) {
+    syncLocalCart();
+
+    switch (result?.status) {
+      case 'ok':
+        return {
+          ok: true
+        };
+      case 'restaurant_conflict':
+        return {
+          ok: false,
+          reason: 'restaurant_conflict',
+          conflict: {
+            currentRestaurantName: result.currentRestaurant?.name || 'this restaurant',
+            nextRestaurantName: result.newRestaurant?.name || 'that restaurant',
+            itemData: result.pendingItem || null
+          }
+        };
+      case 'item_limit':
+        return {
+          ok: false,
+          reason: 'item_limit',
+          message: result.message || ITEM_LIMIT_MESSAGE
+        };
+      case 'order_limit':
+        return {
+          ok: false,
+          reason: 'order_limit',
+          message: result.message || ORDER_LIMIT_MESSAGE
+        };
+      default:
+        return {
+          ok: false,
+          reason: 'error',
+          message: result?.message || 'Unable to update the cart right now.'
+        };
+    }
+  }
+
+  function getHeroImageCandidates(heroPath, fallbackPath, slug) {
+    const candidates = [];
+    const normalizedHeroPath = String(heroPath || '').trim().replace(/\\/g, '/');
+    const normalizedFallbackPath = String(fallbackPath || '').trim().replace(/\\/g, '/');
+    const normalizedSlug = slugify(slug);
+
+    if (
+      normalizedHeroPath
+      && (
+        normalizedHeroPath.includes('images/restaurant-heroes/')
+        || normalizedHeroPath.split('/').pop()?.includes('-hero')
+      )
+    ) {
+      candidates.push(normalizedHeroPath);
+    }
+
+    const fallbackBase = normalizedFallbackPath.split('/').pop()?.replace(/\.[^.]+$/, '') || '';
+    [fallbackBase, normalizedSlug].filter(Boolean).forEach((baseName) => {
+      ['jpg', 'jpeg', 'png', 'webp', 'gif'].forEach((extension) => {
+        candidates.push(`images/restaurant-heroes/${baseName}-hero.${extension}`);
+      });
+    });
+
+    if (normalizedHeroPath && normalizedHeroPath !== normalizedFallbackPath) {
+      candidates.push(normalizedHeroPath);
+    }
+
+    if (normalizedFallbackPath) {
+      candidates.push(normalizedFallbackPath);
+    }
+
+    return Array.from(new Set(candidates.filter(Boolean)));
+  }
+
   function getHeartIcon() {
     return `
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -164,10 +170,47 @@
       category: heroMeta?.lastElementChild?.textContent.trim() || '',
       ratingMeta: heroMeta?.textContent.replace(/\s+/g, ' ').trim() || '',
       offerText: heroOffer?.textContent.trim() || 'Free delivery above \u20B9199',
-      image: '',
+      image: heroFallbackImage,
       heroImage: defaultHeroImage,
       href: window.location.pathname.split('/').pop() || ('menu.php?restaurant=' + encodeURIComponent(slugify(name)))
     };
+  }
+
+  function syncHeroImage(imagePath, fallbackPath, restaurantName) {
+    if (!heroImage) {
+      return;
+    }
+
+    const restaurantSlug = getCurrentRestaurantSlug();
+    const candidates = getHeroImageCandidates(imagePath, fallbackPath || heroFallbackImage, restaurantSlug);
+    const safeFallback = candidates[candidates.length - 1] || '';
+    const tryCandidate = (index) => {
+      const nextCandidate = candidates[index] || safeFallback;
+
+      if (!nextCandidate) {
+        return;
+      }
+
+      heroImage.onerror = () => {
+        const nextIndex = index + 1;
+
+        if (nextIndex < candidates.length) {
+          tryCandidate(nextIndex);
+          return;
+        }
+
+        heroImage.onerror = null;
+      };
+
+      heroImage.src = nextCandidate;
+    };
+
+    if (!candidates.length) {
+      return;
+    }
+
+    heroImage.alt = `${restaurantName || 'Restaurant'} hero image`;
+    tryCandidate(0);
   }
 
   function getDefaultMenuItems(restaurant) {
@@ -279,9 +322,7 @@
       heroOffer.textContent = restaurant.offerText || 'Free delivery above \u20B9199';
     }
 
-    if (heroImage && restaurant.heroImage) {
-      heroImage.src = restaurant.heroImage;
-    }
+    syncHeroImage(restaurant.heroImage, restaurant.image, restaurant.name);
 
     if (!items.length) {
       foodGrid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; color: var(--muted);">No items available</div>';
@@ -399,45 +440,152 @@
   }
 
   function updateQty(itemData, nextQty) {
-    const proposedCart = {
-      ...cart
-    };
-
-    if (nextQty > MAX_ITEM_QUANTITY) {
+    if (!cartManager) {
       return {
         ok: false,
-        reason: 'item_limit',
-        message: ITEM_LIMIT_MESSAGE
+        reason: 'error',
+        message: 'Cart is unavailable right now.'
       };
     }
 
-    if (nextQty <= 0) {
-      delete proposedCart[itemData.id];
-    } else {
-      proposedCart[itemData.id] = {
-        ...proposedCart[itemData.id],
-        ...itemData,
-        quantity: nextQty
-      };
-    }
-
-    if (getTotalCartItems(proposedCart) > MAX_ORDER_ITEMS) {
-      return {
-        ok: false,
-        reason: 'order_limit',
-        message: ORDER_LIMIT_MESSAGE
-      };
-    }
-
-    cart = proposedCart;
-    saveCart();
-    return {
-      ok: true
-    };
+    return normalizeCartMutationResult(cartManager.updateQuantity(itemData.id, nextQty, itemData, {
+      source: 'menu-update-quantity'
+    }));
   }
 
   function addToCart(itemData) {
-    return updateQty(itemData, getQty(itemData.id) + 1);
+    if (!cartManager) {
+      return {
+        ok: false,
+        reason: 'error',
+        message: 'Cart is unavailable right now.'
+      };
+    }
+
+    return normalizeCartMutationResult(cartManager.addItem(itemData, {
+      source: 'menu-add-item'
+    }));
+  }
+
+  function ensureRestaurantRestrictionModal() {
+    if (restaurantModal) {
+      return restaurantModal;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cart-guard-modal-overlay';
+    overlay.setAttribute('hidden', '');
+    overlay.innerHTML = `
+      <section class="cart-guard-modal" role="dialog" aria-modal="true" aria-labelledby="cart-guard-modal-title" aria-describedby="cart-guard-modal-message">
+        <button class="cart-guard-modal-close" type="button" data-modal-action="cancel" aria-label="Close restaurant restriction dialog">&times;</button>
+        <div class="cart-guard-modal-badge">Single restaurant cart</div>
+        <h2 class="cart-guard-modal-title" id="cart-guard-modal-title">Different Restaurant Detected</h2>
+        <p class="cart-guard-modal-message" id="cart-guard-modal-message"></p>
+        <p class="cart-guard-modal-hint"></p>
+        <div class="cart-guard-modal-actions">
+          <button class="secondary-btn cart-guard-modal-cancel" type="button" data-modal-action="cancel">Cancel</button>
+          <button class="primary-btn cart-guard-modal-confirm" type="button" data-modal-action="confirm">Replace Cart</button>
+        </div>
+      </section>
+    `;
+
+    document.body.appendChild(overlay);
+
+    restaurantModal = overlay;
+    restaurantModalTitle = overlay.querySelector('.cart-guard-modal-title');
+    restaurantModalMessage = overlay.querySelector('.cart-guard-modal-message');
+    restaurantModalHint = overlay.querySelector('.cart-guard-modal-hint');
+    restaurantModalCancelButton = overlay.querySelector('.cart-guard-modal-cancel');
+    restaurantModalConfirmButton = overlay.querySelector('.cart-guard-modal-confirm');
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        closeRestaurantRestrictionModal();
+      }
+    });
+
+    overlay.querySelectorAll('[data-modal-action="cancel"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        closeRestaurantRestrictionModal();
+      });
+    });
+
+    restaurantModalConfirmButton?.addEventListener('click', () => {
+      if (!pendingRestaurantSwap?.itemData) {
+        closeRestaurantRestrictionModal();
+        return;
+      }
+
+      const result = normalizeCartMutationResult(cartManager?.clearAndAdd(pendingRestaurantSwap.itemData, {
+        source: 'menu-replace-cart'
+      }));
+      closeRestaurantRestrictionModal();
+
+      if (result?.ok) {
+        refreshCardStates();
+        return;
+      }
+
+      if (result?.message && pendingRestaurantSwap.card) {
+        showCardMessage(pendingRestaurantSwap.card, result.message);
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && restaurantModal && !restaurantModal.hasAttribute('hidden')) {
+        closeRestaurantRestrictionModal();
+      }
+    });
+
+    return overlay;
+  }
+
+  function openRestaurantRestrictionModal(details) {
+    const overlay = ensureRestaurantRestrictionModal();
+    pendingRestaurantSwap = details;
+    lastModalTrigger = details?.trigger instanceof HTMLElement ? details.trigger : document.activeElement;
+
+    if (restaurantModalTitle) {
+      restaurantModalTitle.textContent = 'Different Restaurant Detected';
+    }
+
+    if (restaurantModalMessage) {
+      restaurantModalMessage.textContent = `You already have items from ${details.currentRestaurantName} in your cart. You can only order from one restaurant at a time.`;
+    }
+
+    if (restaurantModalHint) {
+      restaurantModalHint.textContent = `To add items from ${details.nextRestaurantName}, clear your current cart first.`;
+    }
+
+    overlay.removeAttribute('hidden');
+    window.requestAnimationFrame(() => {
+      overlay.classList.add('is-visible');
+    });
+    document.body.classList.add('cart-guard-modal-open');
+    restaurantModalConfirmButton?.focus();
+  }
+
+  function closeRestaurantRestrictionModal() {
+    if (!restaurantModal) {
+      return;
+    }
+
+    restaurantModal.classList.remove('is-visible');
+    document.body.classList.remove('cart-guard-modal-open');
+
+    const triggerToRestore = lastModalTrigger;
+    pendingRestaurantSwap = null;
+    lastModalTrigger = null;
+
+    window.setTimeout(() => {
+      if (restaurantModal && !restaurantModal.classList.contains('is-visible')) {
+        restaurantModal.setAttribute('hidden', '');
+      }
+    }, 220);
+
+    if (triggerToRestore instanceof HTMLElement) {
+      triggerToRestore.focus();
+    }
   }
 
   function createAddButton() {
@@ -673,13 +821,23 @@
       return;
     }
 
+    if (result?.reason === 'restaurant_conflict' && result.conflict) {
+      openRestaurantRestrictionModal({
+        ...result.conflict,
+        itemData: result.conflict.itemData || itemData,
+        card,
+        trigger
+      });
+      return;
+    }
+
     if (result?.message) {
       showCardMessage(card, result.message);
     }
   });
 
   window.addEventListener('cibo-cart-updated', () => {
-    cart = readCart();
+    syncLocalCart();
     refreshCardStates();
   });
 

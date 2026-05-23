@@ -21,7 +21,7 @@ function cibo_current_user_profile(): array
     $db = cibo_app_db();
 
     if (!$db) {
-        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db connection.', 500);
+        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
     }
 
     $record = cibo_find_user_by_id((int) $sessionUser['id']);
@@ -43,7 +43,7 @@ function cibo_update_current_user_profile(array $input): array
     $db = cibo_app_db();
 
     if (!$db) {
-        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db connection.', 500);
+        throw new CiboHttpException('User database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
     }
 
     $userId = (int) $sessionUser['id'];
@@ -132,40 +132,22 @@ function cibo_normalize_address_match_value(string $value): string
 
 function cibo_address_from_record(array $record): array
 {
-    $fullAddress = (string) ($record['full_address'] ?? '');
-    $lines = preg_split('/\r\n|\r|\n/', $fullAddress) ?: [];
-    $address = '';
-    $landmark = '';
-    $name = '';
-    $phone = '';
+    $address = trim((string) ($record['address_line'] ?? ''));
+    $landmark = trim((string) ($record['landmark'] ?? ''));
+    $name = trim((string) ($record['recipient_name'] ?? ''));
+    $phone = trim((string) ($record['recipient_phone'] ?? ''));
+    $fullAddress = $address;
 
-    foreach ($lines as $line) {
-        $line = trim((string) $line);
+    if ($landmark !== '') {
+        $fullAddress .= "\nLandmark: " . $landmark;
+    }
 
-        if ($line === '') {
-            continue;
-        }
+    if ($name !== '') {
+        $fullAddress .= "\nRecipient: " . $name;
+    }
 
-        if (stripos($line, 'Landmark:') === 0) {
-            $landmark = trim(substr($line, 9));
-            continue;
-        }
-
-        if (stripos($line, 'Recipient:') === 0) {
-            $name = trim(substr($line, 10));
-            continue;
-        }
-
-        if (stripos($line, 'Phone:') === 0) {
-            $phone = trim(substr($line, 6));
-            continue;
-        }
-
-        if ($address === '') {
-            $address = $line;
-        } else {
-            $address .= "\n" . $line;
-        }
+    if ($phone !== '') {
+        $fullAddress .= "\nPhone: " . $phone;
     }
 
     return [
@@ -178,9 +160,10 @@ function cibo_address_from_record(array $record): array
         'landmark' => $landmark,
         'city' => trim((string) ($record['city'] ?? '')),
         'state' => trim((string) ($record['state'] ?? '')),
-        'pincode' => trim((string) ($record['postal_code'] ?? '')),
-        'postal_code' => trim((string) ($record['postal_code'] ?? '')),
+        'pincode' => trim((string) ($record['pincode'] ?? '')),
+        'postal_code' => trim((string) ($record['pincode'] ?? '')),
         'full_address' => $fullAddress,
+        'is_default' => (bool) ($record['is_default'] ?? false),
         'created_at' => $record['created_at'] ?? null,
     ];
 }
@@ -195,7 +178,7 @@ function cibo_fetch_current_user_addresses(): array
     }
 
     $statement = $db->prepare('
-        SELECT id, label, full_address, city, state, postal_code, created_at
+        SELECT id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default, created_at
         FROM addresses
         WHERE user_id = ?
         ORDER BY created_at DESC, id DESC
@@ -226,30 +209,49 @@ function cibo_save_current_user_address(array $input): array
     $userId = (int) $user['id'];
     $addressId = (int) ($input['id'] ?? 0);
     $label = cibo_normalize_single_line((string) ($input['type'] ?? $input['label'] ?? 'Home'), 40) ?: 'Home';
-    $address = cibo_normalize_multiline_text((string) ($input['address'] ?? ''), 500);
+    $recipientName = cibo_normalize_single_line((string) ($input['name'] ?? ''), 120);
+    $recipientPhone = cibo_normalize_phone_value((string) ($input['phone'] ?? ''));
+    $address = cibo_normalize_multiline_text((string) ($input['address'] ?? ''), 255);
+    $landmark = cibo_normalize_single_line((string) ($input['landmark'] ?? ''), 120);
     $city = cibo_normalize_single_line((string) ($input['city'] ?? ''), 80);
     $state = cibo_normalize_single_line((string) ($input['state'] ?? ''), 80);
     $postalCode = cibo_normalize_postal_code_value((string) ($input['pincode'] ?? $input['postal_code'] ?? ''));
-    $fullAddress = cibo_address_full_text($input);
+    $isDefault = (bool) ($input['is_default'] ?? false);
 
-    if ($address === '' || $fullAddress === '') {
+    if ($address === '') {
         throw new RuntimeException('Address is required.');
     }
 
-    $phone = cibo_normalize_phone_value((string) ($input['phone'] ?? ''));
+    if ($city === '') {
+        throw new RuntimeException('City is required.');
+    }
 
-    if ($phone !== '' && strlen($phone) !== 10) {
+    if ($recipientPhone !== '' && strlen($recipientPhone) !== 10) {
         throw new RuntimeException('Phone number must be 10 digits.');
+    }
+
+    if ($postalCode === '') {
+        throw new RuntimeException('Pincode is required.');
     }
 
     if ($postalCode !== '' && strlen($postalCode) !== 6) {
         throw new RuntimeException('Pincode must be 6 digits.');
     }
 
+    if ($isDefault) {
+        $resetDefaultStatement = $db->prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?');
+
+        if ($resetDefaultStatement) {
+            $resetDefaultStatement->bind_param('i', $userId);
+            $resetDefaultStatement->execute();
+            $resetDefaultStatement->close();
+        }
+    }
+
     if ($addressId > 0) {
         $statement = $db->prepare('
             UPDATE addresses
-            SET label = ?, full_address = ?, city = ?, state = ?, postal_code = ?
+            SET label = ?, recipient_name = ?, recipient_phone = ?, address_line = ?, landmark = ?, city = ?, state = ?, pincode = ?, is_default = ?
             WHERE id = ? AND user_id = ?
         ');
 
@@ -257,27 +259,29 @@ function cibo_save_current_user_address(array $input): array
             throw new RuntimeException('Unable to update the address.');
         }
 
-        $statement->bind_param('sssssii', $label, $fullAddress, $city, $state, $postalCode, $addressId, $userId);
+        $defaultFlag = $isDefault ? 1 : 0;
+        $statement->bind_param('ssssssssiii', $label, $recipientName, $recipientPhone, $address, $landmark, $city, $state, $postalCode, $defaultFlag, $addressId, $userId);
         $statement->execute();
         $statement->close();
     } else {
         $statement = $db->prepare('
-            INSERT INTO addresses (user_id, label, full_address, city, state, postal_code)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO addresses (user_id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
 
         if (!$statement) {
             throw new RuntimeException('Unable to save the address.');
         }
 
-        $statement->bind_param('isssss', $userId, $label, $fullAddress, $city, $state, $postalCode);
+        $defaultFlag = $isDefault ? 1 : 0;
+        $statement->bind_param('issssssssi', $userId, $label, $recipientName, $recipientPhone, $address, $landmark, $city, $state, $postalCode, $defaultFlag);
         $statement->execute();
         $addressId = (int) $statement->insert_id;
         $statement->close();
     }
 
     $lookupStatement = $db->prepare('
-        SELECT id, label, full_address, city, state, postal_code, created_at
+        SELECT id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default, created_at
         FROM addresses
         WHERE id = ? AND user_id = ?
         LIMIT 1
@@ -339,7 +343,7 @@ function cibo_find_matching_user_addresses(mysqli $db, int $userId, array $custo
     }
 
     $statement = $db->prepare('
-        SELECT id, label, full_address, city, state, postal_code, created_at
+        SELECT id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default, created_at
         FROM addresses
         WHERE user_id = ?
         ORDER BY created_at DESC, id DESC
@@ -387,12 +391,10 @@ function cibo_sync_order_address_for_user(mysqli $db, int $userId, array $custom
     }
 
     $matches = cibo_find_matching_user_addresses($db, $userId, $customer);
-    $fullAddress = cibo_address_full_text([
-        'address' => $address,
-        'name' => trim((string) ($customer['name'] ?? '')),
-        'phone' => trim((string) ($customer['phone'] ?? '')),
-    ]);
     $state = trim((string) ($customer['state'] ?? ''));
+    $recipientName = trim((string) ($customer['name'] ?? ''));
+    $recipientPhone = trim((string) ($customer['phone'] ?? ''));
+    $landmark = trim((string) ($customer['landmark'] ?? ''));
 
     if ($matches) {
         $primaryMatch = null;
@@ -418,12 +420,12 @@ function cibo_sync_order_address_for_user(mysqli $db, int $userId, array $custom
             if ($recentId > 0) {
                 $updateStatement = $db->prepare('
                     UPDATE addresses
-                    SET full_address = ?, city = ?, state = ?, postal_code = ?
+                    SET recipient_name = ?, recipient_phone = ?, address_line = ?, landmark = ?, city = ?, state = ?, pincode = ?
                     WHERE id = ? AND user_id = ?
                 ');
 
                 if ($updateStatement) {
-                    $updateStatement->bind_param('ssssii', $fullAddress, $city, $state, $postalCode, $recentId, $userId);
+                    $updateStatement->bind_param('sssssssii', $recipientName, $recipientPhone, $address, $landmark, $city, $state, $postalCode, $recentId, $userId);
                     $updateStatement->execute();
                     $updateStatement->close();
                 }
@@ -460,8 +462,8 @@ function cibo_sync_order_address_for_user(mysqli $db, int $userId, array $custom
     }
 
     $insertStatement = $db->prepare('
-        INSERT INTO addresses (user_id, label, full_address, city, state, postal_code)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO addresses (user_id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ');
 
     if (!$insertStatement) {
@@ -469,7 +471,7 @@ function cibo_sync_order_address_for_user(mysqli $db, int $userId, array $custom
     }
 
     $label = 'Recent';
-    $insertStatement->bind_param('isssss', $userId, $label, $fullAddress, $city, $state, $postalCode);
+    $insertStatement->bind_param('issssssss', $userId, $label, $recipientName, $recipientPhone, $address, $landmark, $city, $state, $postalCode);
     $insertStatement->execute();
     $insertStatement->close();
 }

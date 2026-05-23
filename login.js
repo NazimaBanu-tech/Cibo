@@ -10,7 +10,9 @@
   const forgotPasswordForm = document.getElementById('forgot-password-form');
   const forgotPasswordMessage = document.getElementById('forgot-password-message');
   const forgotPasswordCancel = document.getElementById('forgot-password-cancel');
+  const forgotPasswordSubmit = document.getElementById('forgot-password-submit');
   const resetEmailInput = document.getElementById('reset-email');
+  const resetPhoneInput = document.getElementById('reset-phone');
   const resetPasswordInput = document.getElementById('reset-password');
   const resetConfirmPasswordInput = document.getElementById('reset-confirm-password');
 
@@ -19,7 +21,9 @@
   }
 
   const defaultSubmitLabel = submitButton.textContent.trim() || 'Sign In';
+  const defaultResetSubmitLabel = forgotPasswordSubmit?.textContent.trim() || 'Update Password';
   let isSubmitting = false;
+  let isResetSubmitting = false;
 
   const fields = {
     email: {
@@ -136,6 +140,25 @@
     return data.user || null;
   }
 
+  async function attemptPasswordReset(email, phone, password) {
+    const response = await fetch('api/user-reset-password.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, phone, password })
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || data.success === false) {
+      throw new Error(data.message || 'Unable to update the password right now.');
+    }
+
+    return data;
+  }
+
   Object.entries(fields).forEach(([fieldName, field]) => {
     field.element.addEventListener('input', () => {
       if (fieldName === 'email') {
@@ -169,7 +192,7 @@
     });
   });
 
-  if (forgotPasswordLink && forgotPasswordPanel && forgotPasswordForm && resetEmailInput && resetPasswordInput && resetConfirmPasswordInput) {
+  if (forgotPasswordLink && forgotPasswordPanel && forgotPasswordForm && resetEmailInput && resetPhoneInput && resetPasswordInput && resetConfirmPasswordInput) {
     const resetFields = {
       reset_email: {
         element: resetEmailInput,
@@ -183,6 +206,24 @@
 
           if (!/^[a-zA-Z0-9._%+-]+@([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/.test(normalized)) {
             return 'Enter a valid email address';
+          }
+
+          return '';
+        }
+      },
+      reset_phone: {
+        element: resetPhoneInput,
+        errorNode: forgotPasswordForm.querySelector('[data-error-for="reset_phone"]'),
+        sanitize: (value) => value.replace(/\D/g, '').slice(0, 10),
+        validate: (value) => {
+          const normalized = String(value || '').trim();
+
+          if (!normalized) {
+            return 'Phone number is required';
+          }
+
+          if (!/^\d{10}$/.test(normalized)) {
+            return 'Phone number must be 10 digits';
           }
 
           return '';
@@ -249,6 +290,16 @@
       return true;
     }
 
+    function updateResetSubmitState() {
+      if (!forgotPasswordSubmit) {
+        return;
+      }
+
+      forgotPasswordSubmit.disabled = isResetSubmitting;
+      forgotPasswordSubmit.toggleAttribute('aria-busy', isResetSubmitting);
+      forgotPasswordSubmit.textContent = isResetSubmitting ? 'Updating Password...' : defaultResetSubmitLabel;
+    }
+
     function validateResetField(fieldName) {
       const field = resetFields[fieldName];
       return setResetFieldState(fieldName, field.validate(field.element.value));
@@ -259,12 +310,23 @@
 
       if (open) {
         resetEmailInput.value = emailInput.value.trim();
+        resetPhoneInput.value = '';
+        resetPasswordInput.value = '';
+        resetConfirmPasswordInput.value = '';
+        Object.keys(resetFields).forEach((fieldName) => setResetFieldState(fieldName, ''));
         setResetMessage('');
+        updateResetSubmitState();
       }
     }
 
     Object.entries(resetFields).forEach(([fieldName, field]) => {
       field.element.addEventListener('input', () => {
+        if (typeof field.sanitize === 'function') {
+          field.element.value = field.sanitize(field.element.value);
+        } else if (fieldName === 'reset_email') {
+          field.element.value = field.element.value.trimStart();
+        }
+
         validateResetField(fieldName);
 
         if (fieldName === 'reset_password' && resetConfirmPasswordInput.value) {
@@ -272,6 +334,17 @@
         }
 
         setResetMessage('');
+        updateResetSubmitState();
+      });
+
+      field.element.addEventListener('blur', () => {
+        validateResetField(fieldName);
+
+        if (fieldName === 'reset_password' && resetConfirmPasswordInput.value) {
+          validateResetField('reset_confirm_password');
+        }
+
+        updateResetSubmitState();
       });
     });
 
@@ -284,18 +357,25 @@
       toggleForgotPassword(false);
     });
 
-    forgotPasswordForm.addEventListener('submit', (event) => {
+    forgotPasswordForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       setResetMessage('');
+
+      if (isResetSubmitting) {
+        return;
+      }
 
       const isValid = Object.keys(resetFields).every(validateResetField);
 
       if (!isValid) {
+        updateResetSubmitState();
         setResetMessage('Please correct the highlighted fields before updating your password.', 'error');
         return;
       }
 
       const email = resetEmailInput.value.trim().toLowerCase();
+      const phone = resetPhoneInput.value.replace(/\D/g, '').trim();
+      const password = resetPasswordInput.value.trim();
 
       if (email === 'admin@cibo.local') {
         setResetFieldState('reset_email', 'Admin password cannot be reset here');
@@ -303,7 +383,23 @@
         return;
       }
 
-      setResetMessage('Password reset is not available here yet. Please use your existing password.', 'error');
+      try {
+        isResetSubmitting = true;
+        updateResetSubmitState();
+        await attemptPasswordReset(email, phone, password);
+        passwordInput.value = '';
+        emailInput.value = email;
+        resetPhoneInput.value = '';
+        resetPasswordInput.value = '';
+        resetConfirmPasswordInput.value = '';
+        setFormMessage('Password updated. Please sign in with your new password.', 'success');
+        toggleForgotPassword(false);
+      } catch (error) {
+        setResetMessage(error.message || 'Unable to update the password right now.', 'error');
+      } finally {
+        isResetSubmitting = false;
+        updateResetSubmitState();
+      }
     });
   }
 

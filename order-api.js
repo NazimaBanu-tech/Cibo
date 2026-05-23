@@ -43,11 +43,36 @@
       });
     },
     listMine() {
-      return request('api/orders.php');
+      return request('api/orders.php', {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          Pragma: 'no-cache'
+        }
+      });
     },
     get(orderNumber) {
       const search = orderNumber ? '?order=' + encodeURIComponent(orderNumber) : '';
-      return request('api/order.php' + search);
+      return request('api/order.php' + search, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          Pragma: 'no-cache'
+        }
+      });
+    },
+    cancel(orderNumber) {
+      return request('api/orders.php', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'cancel',
+          order_number: orderNumber
+        })
+      });
     }
   };
 })();

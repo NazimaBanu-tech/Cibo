@@ -543,12 +543,18 @@
 
           <section class="forgot-password-panel" id="forgot-password-panel">
             <h3>Reset Password</h3>
-            <p>Enter your registered email and choose a new password to regain access.</p>
+            <p>Enter your registered email, the phone number on the account, and choose a new password to regain access.</p>
             <form class="auth-form" id="forgot-password-form" novalidate>
               <div class="form-group">
                 <label for="reset-email">Email Address</label>
                 <input id="reset-email" name="reset_email" type="email" placeholder="Enter your registered email" autocomplete="email" required>
                 <div class="field-error" data-error-for="reset_email" aria-live="polite"></div>
+              </div>
+
+              <div class="form-group">
+                <label for="reset-phone">Registered Phone Number</label>
+                <input id="reset-phone" name="reset_phone" type="tel" inputmode="numeric" placeholder="Enter your 10-digit phone number" autocomplete="tel" maxlength="10" required>
+                <div class="field-error" data-error-for="reset_phone" aria-live="polite"></div>
               </div>
 
               <div class="form-group">
@@ -656,6 +662,7 @@
   </footer>
 
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="login.js"></script>
   <script src="cart-badge.js"></script>
 </body>

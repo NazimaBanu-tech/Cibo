@@ -16,6 +16,141 @@
       padding: 34px 48px 60px;
     }
 
+    .cart-toast-region {
+      position: fixed;
+      top: calc(84px + env(safe-area-inset-top, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(100% - 32px, 440px);
+      display: grid;
+      gap: 12px;
+      z-index: 1100;
+      pointer-events: none;
+    }
+
+    .cart-toast {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid #e6dccf;
+      background: rgba(255, 253, 249, 0.96);
+      box-shadow: 0 18px 34px rgba(31, 31, 27, 0.14);
+      backdrop-filter: blur(12px);
+      color: #4b463f;
+      pointer-events: auto;
+      opacity: 0;
+      transform: translateY(-10px) scale(0.98);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+
+    .cart-toast.is-visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .cart-toast[data-type="info"] {
+      border-color: #dde6d2;
+      background: rgba(248, 252, 243, 0.97);
+    }
+
+    .cart-toast[data-type="success"] {
+      border-color: #d4e7cb;
+      background: rgba(243, 251, 239, 0.97);
+    }
+
+    .cart-toast[data-type="warning"] {
+      border-color: #ecd7bf;
+      background: rgba(255, 247, 236, 0.97);
+    }
+
+    .cart-toast[data-type="error"] {
+      border-color: #ebc9c9;
+      background: rgba(255, 245, 245, 0.98);
+    }
+
+    .cart-toast-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      flex-shrink: 0;
+      background: #f6f1e8;
+      color: #8a5d2f;
+    }
+
+    .cart-toast[data-type="info"] .cart-toast-icon {
+      background: #eef4e7;
+      color: #5f7c3a;
+    }
+
+    .cart-toast[data-type="success"] .cart-toast-icon {
+      background: #e7f4df;
+      color: #3f7a2c;
+    }
+
+    .cart-toast[data-type="warning"] .cart-toast-icon {
+      background: #fff1df;
+      color: #b56a17;
+    }
+
+    .cart-toast[data-type="error"] .cart-toast-icon {
+      background: #fce8e8;
+      color: #b14a4a;
+    }
+
+    .cart-toast-copy {
+      min-width: 0;
+      padding-top: 1px;
+    }
+
+    .cart-toast-title {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #171715;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+    }
+
+    .cart-toast-message {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.5;
+      color: #4b463f;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .cart-toast-dismiss {
+      width: 34px;
+      height: 34px;
+      border: none;
+      border-radius: 12px;
+      background: transparent;
+      color: #6f685f;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background-color 0.2s ease, color 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .cart-toast-dismiss:hover,
+    .cart-toast-dismiss:focus-visible {
+      background: rgba(31, 31, 27, 0.06);
+      color: #171715;
+      outline: none;
+    }
+
     .cart-header {
       margin-bottom: 28px;
     }
@@ -603,6 +738,23 @@
     }
 
     @media (max-width: 640px) {
+      .cart-toast-region {
+        top: calc(74px + env(safe-area-inset-top, 0px));
+        width: calc(100% - 24px);
+      }
+
+      .cart-toast {
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px 12px;
+        padding: 13px 14px;
+      }
+
+      .cart-toast-dismiss {
+        grid-column: 2;
+        justify-self: end;
+        margin-top: -2px;
+      }
+
       .cart-header h1 {
         font-size: 30px;
       }
@@ -647,6 +799,8 @@
 
   <?php include 'header.php'; ?>
 
+  <div class="cart-toast-region" aria-live="polite" aria-atomic="true" data-cart-toast-region></div>
+
   <main class="cart-page">
     <div class="cart-header">
       <h1>Your Cart</h1>
@@ -661,7 +815,7 @@
           <div class="cart-restaurant">
             <div>
               <h3>Your Selected Restaurant</h3>
-              <p>Your cart items will appear here after the page finishes loading.</p>
+              <p>Your selected items will appear here as soon as your current cart is ready.</p>
             </div>
             <span class="cart-badge">Offers apply when your cart is ready</span>
           </div>
@@ -818,6 +972,7 @@
     </div>
   </div>
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="bill-summary.js?v=20260508"></script>
   <script src="cart.js"></script>
   <script src="cart-badge.js"></script>

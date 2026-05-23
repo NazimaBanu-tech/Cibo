@@ -1,7 +1,4 @@
 (() => {
-  const ADMIN_EMAIL = 'admin@cibo.local';
-  const ADMIN_PASSWORD = 'cibo123';
-  const AUTH_KEY = 'cibo_admin_auth';
   const RESTAURANTS_KEY = 'restaurants';
   const MENU_ITEMS_KEY = 'menuItems';
   const ORDERS_KEY = 'orders';
@@ -12,7 +9,6 @@
   const path = window.location.pathname.toLowerCase();
   const isLoginPage = path.endsWith('/admin/login.php') || path.endsWith('\\admin\\login.php');
   const isPanelPage = path.endsWith('/admin/panel.php') || path.endsWith('/admin/index.php') || path.endsWith('\\admin\\panel.php') || path.endsWith('\\admin\\index.php');
-  const phpAuthMode = document.body?.dataset.authMode === 'php';
 
   function readJSON(key, fallback) {
     try {
@@ -175,18 +171,6 @@
     return '../' + value.replace(/^\/+/, '');
   }
 
-  function readAdminSession() {
-    return readJSON(AUTH_KEY, null);
-  }
-
-  function saveAdminSession(payload) {
-    saveJSON(AUTH_KEY, payload);
-  }
-
-  function clearAdminSession() {
-    localStorage.removeItem(AUTH_KEY);
-  }
-
   function createRequestId() {
     return 'cibo-admin-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   }
@@ -205,8 +189,6 @@
 
     if (!response.ok || data.success === false) {
       if (response.status === 401 || response.status === 403) {
-        clearAdminSession();
-
         if (isPanelPage) {
           window.location.href = 'login.php';
           return Promise.reject(new Error('Admin session expired.'));
@@ -253,14 +235,32 @@
   }
 
   function mapServerOrder(order) {
+    const rawStatus = String(order.order_status || 'placed').trim().toLowerCase() || 'placed';
+    const availableStatusOptions = order?.available_order_statuses && typeof order.available_order_statuses === 'object'
+      ? Object.entries(order.available_order_statuses)
+          .map(([value, label]) => ({
+            value: String(value || '').trim().toLowerCase(),
+            label: String(label || value || '--').trim() || '--'
+          }))
+          .filter((option) => option.value)
+      : [];
+    const allowedNextStatuses = Array.isArray(order?.allowed_next_order_statuses)
+      ? order.allowed_next_order_statuses.map((status) => String(status || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
     return {
       id: order.order_number || order.id,
       user: order.user_name,
       restaurant: order.restaurant_name,
       items: Array.isArray(order.items) ? order.items : [],
+      deliveryAddress: String(order.delivery_address || '').trim(),
+      paymentStatus: String(order.payment_status_label || order.payment_status || '--').trim() || '--',
       total: Number(order.total_amount) || 0,
-      status: order.order_status_label || 'Pending',
-      rawStatus: order.order_status || 'pending',
+      status: String(order.order_status_label || order.order_status || '--').trim() || '--',
+      rawStatus,
+      availableStatusOptions,
+      allowedNextStatuses,
+      isStatusLocked: Boolean(order?.is_order_status_locked),
       date: order.placed_at || order.created_at || new Date().toISOString()
     };
   }
@@ -345,7 +345,6 @@
         storageKey === LEGACY_ORDERS_KEY ||
         storageKey === 'orderStatus' ||
         storageKey === 'orderHistory' ||
-        storageKey === 'pendingOrders' ||
         storageKey.startsWith(USER_ORDERS_PREFIX)
       ) {
         keysToRemove.push(storageKey);
@@ -385,7 +384,7 @@
           restaurant: order.restaurant || order.restaurantName || 'Cibo Order',
           items: Array.isArray(order.items) ? order.items : [],
           total: Number(order.total) || 0,
-          status: order.status || 'Pending',
+          status: order.status || order.order_status_label || order.order_status || '--',
           date: order.date || new Date().toISOString(),
           _storageKey: storageKey
         });
@@ -411,7 +410,7 @@
     window.clearTimeout(showMessage._timer);
     showMessage._timer = window.setTimeout(() => {
       feedback.style.display = 'none';
-    }, 2200);
+    }, type === 'error' ? 4200 : 2200);
   }
 
   function setButtonBusy(button, busy, busyLabel, idleLabel) {
@@ -720,73 +719,21 @@
 
   function setupLoginPage() {
     const form = document.getElementById('admin-login-form');
-    const errorBox = document.getElementById('admin-login-error');
 
     if (!form) {
       return;
     }
 
-    if (!phpAuthMode && readAdminSession()) {
-      window.location.href = 'panel.php';
-      return;
-    }
-
     setupPasswordToggles();
-
-    if (phpAuthMode) {
-      return;
-    }
-
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-
-      const email = form.elements.email.value.trim().toLowerCase();
-      const password = form.elements.password.value.trim();
-
-      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        saveAdminSession({
-          name: 'Cibo Admin',
-          email: ADMIN_EMAIL,
-          signedInAt: new Date().toISOString()
-        });
-        window.location.href = 'panel.php';
-        return;
-      }
-
-      if (errorBox) {
-        errorBox.style.display = 'flex';
-        const copy = errorBox.querySelector('span') || errorBox;
-        copy.textContent = 'Invalid admin credentials. Use admin@cibo.local / cibo123';
-      }
-    });
   }
 
   function setupPanelPage() {
-    const adminSession = phpAuthMode ? null : readAdminSession();
-
-    if (!phpAuthMode && !adminSession) {
-      window.location.href = 'login.php';
-      return;
-    }
-
-    const sessionName = document.getElementById('admin-session-name');
-    if (sessionName && adminSession) {
-      sessionName.textContent = adminSession.name || 'Cibo Admin';
-    }
-
-    const logoutButton = document.getElementById('admin-logout-button');
-    if (logoutButton && !phpAuthMode) {
-      logoutButton.addEventListener('click', () => {
-        clearAdminSession();
-        window.location.href = 'login.php';
-      });
-    }
-
     const navLinks = Array.from(document.querySelectorAll('[data-section-link]'));
     const sections = Array.from(document.querySelectorAll('[data-section-panel]'));
+    const availableSections = new Set(navLinks.map((link) => String(link.dataset.sectionLink || '').trim()).filter(Boolean));
     const params = new URLSearchParams(window.location.search);
     let activeSection = params.get('section') || 'dashboard';
-    let activeDashboardStat = 'orders';
+    let activeDashboardStat = 'revenue';
     const statCards = Array.from(document.querySelectorAll('[data-stat-target]'));
     const dashboardDetailTitle = document.getElementById('dashboard-detail-title');
     const dashboardDetailCopy = document.getElementById('dashboard-detail-copy');
@@ -823,15 +770,16 @@
     let dashboardStats = {
       orders: 0,
       revenue: 0,
+      todayRevenue: 0,
+      placedOrders: 0,
+      preparingOrders: 0,
+      outForDeliveryOrders: 0,
+      deliveredOrders: 0,
+      cancelledOrders: 0,
       users: 0,
       restaurants: 0
     };
-    let statusOptions = {
-      pending: 'Pending',
-      preparing: 'Preparing',
-      out_for_delivery: 'Out for Delivery',
-      delivered: 'Delivered'
-    };
+    let statusOptions = {};
 
     setupImageAutocomplete();
 
@@ -863,18 +811,30 @@
         ? {
             orders: Number(data.stats.orders) || 0,
             revenue: Number(data.stats.revenue) || 0,
+            todayRevenue: Number(data.stats.today_revenue) || 0,
+            placedOrders: Number(data.stats.placed_orders) || 0,
+            preparingOrders: Number(data.stats.preparing_orders) || 0,
+            outForDeliveryOrders: Number(data.stats.out_for_delivery_orders) || 0,
+            deliveredOrders: Number(data.stats.delivered_orders) || 0,
+            cancelledOrders: Number(data.stats.cancelled_orders) || 0,
             users: Number(data.stats.users) || 0,
             restaurants: Number(data.stats.restaurants) || 0
           }
         : {
             orders: 0,
             revenue: 0,
+            todayRevenue: 0,
+            placedOrders: 0,
+            preparingOrders: 0,
+            outForDeliveryOrders: 0,
+            deliveredOrders: 0,
+            cancelledOrders: 0,
             users: 0,
             restaurants: 0
           };
       statusOptions = data?.status_options && typeof data.status_options === 'object'
         ? data.status_options
-        : statusOptions;
+        : {};
       restaurants = Array.isArray(data.restaurants)
         ? data.restaurants.map(mapServerRestaurant)
         : [];
@@ -889,34 +849,202 @@
         : [];
     }
 
-    function labelToStatusValue(label) {
-      return String(label || 'Pending')
-        .toLowerCase()
-        .replace(/\s+/g, '_');
+    function normalizeSectionName(sectionName) {
+      const normalized = String(sectionName || '').trim();
+      return availableSections.has(normalized) ? normalized : 'dashboard';
     }
 
-    function statusValueToLabel(value) {
-      const normalizedValue = String(value || 'pending').toLowerCase();
-      return String(statusOptions[normalizedValue] || 'Pending');
+    function setCollectionErrorStates(message) {
+      if (restaurantGrid) {
+        restaurantGrid.innerHTML = '';
+      }
+      if (menuGrid) {
+        menuGrid.innerHTML = '';
+      }
+      if (ordersBody) {
+        ordersBody.innerHTML = '';
+      }
+      if (usersBody) {
+        usersBody.innerHTML = '';
+      }
+
+      if (restaurantEmpty) {
+        restaurantEmpty.style.display = 'block';
+        restaurantEmpty.textContent = message;
+      }
+
+      if (menuEmpty) {
+        menuEmpty.style.display = 'block';
+        menuEmpty.textContent = message;
+      }
+
+      if (ordersWrap) {
+        ordersWrap.style.display = 'none';
+      }
+      if (ordersEmpty) {
+        ordersEmpty.style.display = 'block';
+        ordersEmpty.textContent = message;
+      }
+
+      if (usersWrap) {
+        usersWrap.style.display = 'none';
+      }
+      if (usersEmpty) {
+        usersEmpty.style.display = 'block';
+        usersEmpty.textContent = message;
+      }
     }
 
     function activateSection(sectionName) {
-      activeSection = sectionName;
+      activeSection = normalizeSectionName(sectionName);
       navLinks.forEach((link) => {
-        link.classList.toggle('is-active', link.dataset.sectionLink === sectionName);
+        link.classList.toggle('is-active', link.dataset.sectionLink === activeSection);
       });
 
       sections.forEach((section) => {
-        section.classList.toggle('is-active', section.dataset.sectionPanel === sectionName);
+        section.classList.toggle('is-active', section.dataset.sectionPanel === activeSection);
       });
 
       const nextUrl = new URL(window.location.href);
-      nextUrl.searchParams.set('section', sectionName);
+      nextUrl.searchParams.set('section', activeSection);
       window.history.replaceState({}, '', nextUrl);
     }
 
     function formatDate(value) {
       return new Date(value || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    function formatDateTime(value) {
+      return new Date(value || Date.now()).toLocaleString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }
+
+    function getStartOfDay(date) {
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    }
+
+    function isSameLocalDay(firstDate, secondDate) {
+      return getStartOfDay(firstDate).getTime() === getStartOfDay(secondDate).getTime();
+    }
+
+    function isWithinLastDays(orderDate, days) {
+      const today = getStartOfDay(new Date());
+      const diff = today.getTime() - getStartOfDay(orderDate).getTime();
+      const daysDiff = diff / 86400000;
+      return daysDiff >= 0 && daysDiff < days;
+    }
+
+    function getOrdersByStatus(status) {
+      const targetStatus = String(status || '').trim().toLowerCase();
+      return orders.filter((order) => String(order.rawStatus || '').trim().toLowerCase() === targetStatus);
+    }
+
+    function getStatusLabel(status) {
+      return String(statusOptions?.[status] || status || '--').trim() || '--';
+    }
+
+    function getOrderStatusOptions(order) {
+      if (Array.isArray(order?.availableStatusOptions) && order.availableStatusOptions.length) {
+        return order.availableStatusOptions;
+      }
+
+      const fallbackLabel = getStatusLabel(order?.rawStatus || '');
+
+      return [{
+        value: String(order?.rawStatus || 'placed').trim().toLowerCase() || 'placed',
+        label: fallbackLabel
+      }];
+    }
+
+    function getOrderStatusHelpText(order) {
+      if (order?.isStatusLocked) {
+        return 'Final status';
+      }
+
+      if (Array.isArray(order?.allowedNextStatuses) && order.allowedNextStatuses.length) {
+        return `Next: ${order.allowedNextStatuses.map((status) => getStatusLabel(status)).join(', ')}`;
+      }
+
+      return 'Current status';
+    }
+
+    function getDashboardInsights() {
+      const now = new Date();
+      const today = getStartOfDay(now);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
+      let todayOrders = 0;
+      let yesterdayOrders = 0;
+      let weeklyOrders = 0;
+      let weeklyRevenue = 0;
+      let monthlyRevenue = 0;
+      let cancelledOrders = 0;
+      const restaurantCounts = new Map();
+
+      const sortedOrders = orders.slice().sort((first, second) => new Date(second.date || 0) - new Date(first.date || 0));
+
+      sortedOrders.forEach((order) => {
+        const orderDate = new Date(order.date || Date.now());
+        const isCancelled = String(order.rawStatus || '').trim().toLowerCase() === 'cancelled';
+
+        if (isSameLocalDay(orderDate, today)) {
+          todayOrders += 1;
+        }
+
+        if (isSameLocalDay(orderDate, yesterday)) {
+          yesterdayOrders += 1;
+        }
+
+        if (isWithinLastDays(orderDate, 7)) {
+          weeklyOrders += 1;
+          if (!isCancelled) {
+            weeklyRevenue += Number(order.total) || 0;
+          }
+        }
+
+        if (orderDate.getFullYear() === currentYear && orderDate.getMonth() === currentMonth && !isCancelled) {
+          monthlyRevenue += Number(order.total) || 0;
+        }
+
+        if (isCancelled) {
+          cancelledOrders += 1;
+        }
+
+        const restaurantName = String(order.restaurant || 'Cibo Order').trim() || 'Cibo Order';
+        restaurantCounts.set(restaurantName, (restaurantCounts.get(restaurantName) || 0) + 1);
+      });
+
+      const totalOrders = sortedOrders.length;
+      const cancellationRate = totalOrders > 0 ? (cancelledOrders / totalOrders) * 100 : 0;
+      const topRestaurants = Array.from(restaurantCounts.entries())
+        .sort((first, second) => second[1] - first[1])
+        .slice(0, 3)
+        .map(([name, count]) => ({ name, count }));
+      const recentOrders = sortedOrders.slice(0, 5).map((order) => ({
+        id: order.id,
+        amount: Number(order.total) || 0,
+        status: order.status || getStatusLabel(order.rawStatus) || '--',
+        date: order.date
+      }));
+
+      return {
+        todayOrders,
+        yesterdayOrders,
+        weeklyOrders,
+        weeklyRevenue,
+        monthlyRevenue,
+        cancelledOrders,
+        cancellationRate,
+        topRestaurants,
+        recentOrders
+      };
     }
 
     function renderDashboardDetails(statName) {
@@ -987,7 +1115,135 @@
         items = orders.slice(0, 5).map((order) => ({
           title: `#${order.id}`,
           meta: `${order.user || 'Customer'} • ${order.restaurant || 'Cibo Order'}`,
-          value: `${order.status || 'Pending'} • ${formatPrice(order.total)}`
+          value: `${order.status || order.rawStatus || '--'} • ${formatPrice(order.total)}`
+        }));
+      }
+
+      if (!items.length) {
+        items = [{
+          title: 'No data yet',
+          meta: 'Create or place some demo records and this area will fill in automatically.',
+          value: 'Ready for data'
+        }];
+      }
+
+      dashboardDetailTitle.textContent = title;
+      dashboardDetailCopy.textContent = copy;
+      dashboardDetailAction.textContent = actionLabel;
+      dashboardDetailAction.dataset.targetSection = actionSection;
+      dashboardDetailBody.innerHTML = items.map((item) => `
+        <article class="dashboard-detail-item">
+          <div>
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.meta)}</span>
+          </div>
+          <small>${escapeHtml(item.value)}</small>
+        </article>
+      `).join('');
+    }
+
+    function renderOperationsDashboardDetails(statName) {
+      if (!dashboardDetailTitle || !dashboardDetailCopy || !dashboardDetailBody || !dashboardDetailAction) {
+        return;
+      }
+
+      activeDashboardStat = statName;
+      statCards.forEach((card) => {
+        card.classList.toggle('is-active', card.dataset.statTarget === statName);
+      });
+
+      let title = 'Operations Snapshot';
+      let copy = 'A live operational summary powered by the backend order records.';
+      let actionLabel = 'Open Orders';
+      let actionSection = 'orders';
+      let items = [];
+
+      if (statName === 'revenue') {
+        const revenue = Number(dashboardStats.revenue) || 0;
+        const averageOrder = dashboardStats.orders ? revenue / dashboardStats.orders : 0;
+        title = 'Revenue Details';
+        copy = 'Revenue uses the normalized final order amount from non-cancelled backend orders.';
+        actionLabel = 'View Orders';
+        items = [
+          {
+            title: 'Total Revenue',
+            meta: 'All non-cancelled recorded order value in the current system.',
+            value: formatPrice(revenue)
+          },
+          {
+            title: 'Today Revenue',
+            meta: 'Current day revenue based on backend order timestamps.',
+            value: formatPrice(dashboardStats.todayRevenue)
+          },
+          {
+            title: 'Average Order Value',
+            meta: 'Average basket size across all recorded orders.',
+            value: formatPrice(averageOrder)
+          },
+          {
+            title: 'Latest Revenue Order',
+            meta: orders[0] ? `${orders[0].user || 'Customer'} • ${orders[0].restaurant || 'Cibo Order'}` : 'No order data yet.',
+            value: orders[0] ? formatPrice(orders[0].total) : '₹0'
+          }
+        ];
+      } else if (statName === 'today_revenue') {
+        const todayKey = new Date().toISOString().slice(0, 10);
+        const todayOrders = orders.filter((order) => String(order.date || '').slice(0, 10) === todayKey);
+        title = 'Today Revenue';
+        copy = 'A focused look at today’s sales intake using the same backend truth as the full revenue total.';
+        items = [
+          {
+            title: 'Today Revenue',
+            meta: 'Current day order value excluding cancelled orders.',
+            value: formatPrice(dashboardStats.todayRevenue)
+          },
+          {
+            title: 'Today Order Count',
+            meta: 'Orders created in the current day.',
+            value: String(todayOrders.length)
+          },
+          {
+            title: 'Latest Today Order',
+            meta: todayOrders[0] ? `${todayOrders[0].user || 'Customer'} • ${todayOrders[0].restaurant || 'Cibo Order'}` : 'No orders placed today yet.',
+            value: todayOrders[0] ? formatPrice(todayOrders[0].total) : '₹0'
+          }
+        ];
+      } else if (statName === 'placed' || statName === 'preparing' || statName === 'out_for_delivery' || statName === 'delivered' || statName === 'cancelled') {
+        const statusOrders = getOrdersByStatus(statName);
+        title = `${getStatusLabel(statName)} Orders`;
+        copy = 'This list stays aligned to the canonical backend order lifecycle.';
+        items = statusOrders.slice(0, 6).map((order) => ({
+          title: `#${order.id}`,
+          meta: `${order.user || 'Customer'} • ${order.restaurant || 'Cibo Order'}`,
+          value: `${formatPrice(order.total)} • ${formatDate(order.date)}`
+        }));
+      } else if (statName === 'users') {
+        title = 'Users Snapshot';
+        copy = 'Recently synced customers visible in the backend user records.';
+        actionLabel = 'Open Users';
+        actionSection = 'users';
+        items = users.slice(0, 5).map((user) => ({
+          title: user.name || 'User',
+          meta: user.email || 'No email provided',
+          value: formatDate(user.createdAt)
+        }));
+      } else if (statName === 'restaurants') {
+        title = 'Restaurants Snapshot';
+        copy = 'Current active restaurant records supporting the customer ordering flow.';
+        actionLabel = 'Open Restaurants';
+        actionSection = 'restaurants';
+        items = restaurants.slice(0, 6).map((restaurant) => ({
+          title: restaurant.name || 'Restaurant',
+          meta: `${restaurant.location || 'Unknown location'} • ${restaurant.category || 'food'}`,
+          value: restaurant.ratingMeta || '★ 4.3 • 25-30 mins'
+        }));
+      } else {
+        title = 'Orders Snapshot';
+        copy = 'Recent order activity from the database-backed customer flow.';
+        items = orders.slice(0, 6).map((order) => ({
+          title: `#${order.id}`,
+          meta: `${order.user || 'Customer'} • ${order.restaurant || 'Cibo Order'}`,
+          value: `${order.status || order.rawStatus || '--'} • ${formatPrice(order.total)}`
         }));
       }
 
@@ -1032,14 +1288,71 @@
     function renderDashboard() {
       const statOrders = document.getElementById('stat-orders');
       const statRevenue = document.getElementById('stat-revenue');
+      const statTodayRevenue = document.getElementById('stat-today-revenue');
+      const statPlacedOrders = document.getElementById('stat-placed-orders');
+      const statPreparingOrders = document.getElementById('stat-preparing-orders');
+      const statOutForDeliveryOrders = document.getElementById('stat-out-for-delivery-orders');
+      const statDeliveredOrders = document.getElementById('stat-delivered-orders');
+      const statCancelledOrders = document.getElementById('stat-cancelled-orders');
       const statUsers = document.getElementById('stat-users');
       const statRestaurants = document.getElementById('stat-restaurants');
+      const insightTodayOrders = document.getElementById('insight-today-orders');
+      const insightYesterdayOrders = document.getElementById('insight-yesterday-orders');
+      const insightWeeklyOrders = document.getElementById('insight-weekly-orders');
+      const insightWeeklyRevenue = document.getElementById('insight-weekly-revenue');
+      const insightMonthlyRevenue = document.getElementById('insight-monthly-revenue');
+      const insightCancellationRate = document.getElementById('insight-cancellation-rate');
+      const topRestaurantsList = document.getElementById('dashboard-top-restaurants');
+      const recentActivityList = document.getElementById('dashboard-recent-activity');
+      const insights = getDashboardInsights();
 
       if (statOrders) statOrders.textContent = String(Number(dashboardStats.orders) || 0);
       if (statRevenue) statRevenue.textContent = formatPrice(Number(dashboardStats.revenue) || 0);
+      if (statTodayRevenue) statTodayRevenue.textContent = formatPrice(Number(dashboardStats.todayRevenue) || 0);
+      if (statPlacedOrders) statPlacedOrders.textContent = String(Number(dashboardStats.placedOrders) || 0);
+      if (statPreparingOrders) statPreparingOrders.textContent = String(Number(dashboardStats.preparingOrders) || 0);
+      if (statOutForDeliveryOrders) statOutForDeliveryOrders.textContent = String(Number(dashboardStats.outForDeliveryOrders) || 0);
+      if (statDeliveredOrders) statDeliveredOrders.textContent = String(Number(dashboardStats.deliveredOrders) || 0);
+      if (statCancelledOrders) statCancelledOrders.textContent = String(Number(dashboardStats.cancelledOrders) || 0);
       if (statUsers) statUsers.textContent = String(Number(dashboardStats.users) || 0);
       if (statRestaurants) statRestaurants.textContent = String(Number(dashboardStats.restaurants) || 0);
-      renderDashboardDetails(activeDashboardStat);
+
+      if (insightTodayOrders) insightTodayOrders.textContent = String(insights.todayOrders);
+      if (insightYesterdayOrders) insightYesterdayOrders.textContent = String(insights.yesterdayOrders);
+      if (insightWeeklyOrders) insightWeeklyOrders.textContent = String(insights.weeklyOrders);
+      if (insightWeeklyRevenue) insightWeeklyRevenue.textContent = formatPrice(insights.weeklyRevenue);
+      if (insightMonthlyRevenue) insightMonthlyRevenue.textContent = formatPrice(insights.monthlyRevenue);
+      if (insightCancellationRate) insightCancellationRate.textContent = `${insights.cancellationRate.toFixed(1)}%`;
+
+      if (topRestaurantsList) {
+        topRestaurantsList.innerHTML = insights.topRestaurants.length
+          ? insights.topRestaurants.map((restaurant, index) => `
+            <article class="dashboard-report-item">
+              <div>
+                <strong>${escapeHtml(`${index + 1}. ${restaurant.name}`)}</strong>
+                <span>${escapeHtml(`Ranked by backend order count across saved lifecycle records`)}</span>
+              </div>
+              <small>${escapeHtml(`${restaurant.count} orders`)}</small>
+            </article>
+          `).join('')
+          : '<div class="dashboard-report-empty">Top restaurants will appear here once a few orders have been placed.</div>';
+      }
+
+      if (recentActivityList) {
+        recentActivityList.innerHTML = insights.recentOrders.length
+          ? insights.recentOrders.map((order) => `
+            <article class="dashboard-report-item">
+              <div>
+                <strong>${escapeHtml(`#${order.id}`)}</strong>
+                <span>${escapeHtml(order.status || '--')}</span>
+              </div>
+              <small>${escapeHtml(`${formatPrice(order.amount)} • ${formatDateTime(order.date)}`)}</small>
+            </article>
+          `).join('')
+          : '<div class="dashboard-report-empty">Recent order activity will appear here as soon as new orders come in.</div>';
+      }
+
+      renderOperationsDashboardDetails(activeDashboardStat);
     }
 
     function renderRestaurants() {
@@ -1052,7 +1365,7 @@
       if (!restaurants.length) {
         restaurantGrid.innerHTML = '';
         restaurantEmpty.style.display = 'block';
-        restaurantEmpty.textContent = 'No restaurants yet. Add your first restaurant to populate the customer experience.';
+        restaurantEmpty.textContent = 'No restaurants yet. Add your first restaurant to start the customer ordering experience.';
         renderDashboard();
         return;
       }
@@ -1086,7 +1399,7 @@
       if (!menuItems.length) {
         menuGrid.innerHTML = '';
         menuEmpty.style.display = 'block';
-        menuEmpty.textContent = 'No menu items yet. Create one to start building the catalog.';
+        menuEmpty.textContent = 'No menu items yet. Add a few dishes to start building the live catalog.';
         renderDashboard();
         return;
       }
@@ -1124,7 +1437,7 @@
         ordersBody.innerHTML = '';
         ordersWrap.style.display = 'none';
         ordersEmpty.style.display = 'block';
-        ordersEmpty.textContent = 'No orders yet. Customer orders will appear here as they are placed.';
+        ordersEmpty.textContent = 'No orders yet. Customer orders will appear here as soon as they are placed.';
         renderDashboard();
         return;
       }
@@ -1135,22 +1448,24 @@
         const itemSummary = Array.isArray(order.items) && order.items.length
           ? order.items.map((item) => `${item.name} x${item.quantity}`).join(', ')
           : 'No items available';
-        const orderStatusOptionsMarkup = Object.entries(statusOptions)
-          .map(([value, label]) => ({ value: String(value || '').toLowerCase(), label: String(label || 'Pending') }))
-          .filter((option) => option.value)
-          .map((option) => `<option value="${escapeHtml(option.value)}" ${labelToStatusValue(order.status) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+        const orderStatusOptionsMarkup = getOrderStatusOptions(order)
+          .map((option) => `<option value="${escapeHtml(option.value)}" ${String(order.rawStatus || '').toLowerCase() === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
           .join('');
+        const orderStatusHelpText = getOrderStatusHelpText(order);
 
         return `
           <tr>
             <td><strong>#${escapeHtml(order.id)}</strong></td>
             <td>${escapeHtml(order.user || 'Customer')}</td>
             <td>${escapeHtml(itemSummary)}</td>
+            <td>${escapeHtml(order.deliveryAddress || 'Address unavailable')}</td>
+            <td>${escapeHtml(order.paymentStatus || '--')}</td>
             <td><strong>${formatPrice(order.total)}</strong></td>
             <td>
-              <select class="field-select" data-order-status="${escapeHtml(order.id)}">
+              <select class="field-select admin-order-status-select" data-order-status="${escapeHtml(order.id)}" ${order.isStatusLocked ? 'disabled aria-disabled="true"' : ''}>
                 ${orderStatusOptionsMarkup}
               </select>
+              <div class="admin-order-status-note">${escapeHtml(orderStatusHelpText)}</div>
             </td>
           </tr>
         `;
@@ -1168,7 +1483,7 @@
         usersBody.innerHTML = '';
         usersWrap.style.display = 'none';
         usersEmpty.style.display = 'block';
-        usersEmpty.textContent = 'No users yet. New customer signups will appear here automatically.';
+        usersEmpty.textContent = 'No users yet. New customer accounts will appear here automatically.';
         renderDashboard();
         return;
       }
@@ -1435,14 +1750,14 @@
       try {
         statusSelect.disabled = true;
         const updatedOrder = await updateServerOrderStatus(statusSelect.dataset.orderStatus, statusSelect.value);
-        order.status = statusValueToLabel(updatedOrder?.order_status || statusSelect.value);
-        order.rawStatus = updatedOrder?.order_status || statusSelect.value;
+        order.rawStatus = String(updatedOrder?.order_status || statusSelect.value).trim().toLowerCase();
+        order.status = String(updatedOrder?.order_status_label || updatedOrder?.order_status || statusSelect.value).trim() || '--';
         await loadPanelData();
         renderOrders();
         renderDashboard();
         showMessage('Order updated.');
       } catch (error) {
-        statusSelect.value = labelToStatusValue(order.status);
+        statusSelect.value = order.rawStatus;
         showMessage(error.message || 'Unable to update the order.', 'error');
       } finally {
         statusSelect.disabled = false;
@@ -1458,7 +1773,7 @@
 
     statCards.forEach((card) => {
       card.addEventListener('click', () => {
-        renderDashboardDetails(card.dataset.statTarget || 'orders');
+        renderOperationsDashboardDetails(card.dataset.statTarget || 'revenue');
       });
     });
 
@@ -1478,6 +1793,7 @@
         renderUsers();
       })
       .catch((error) => {
+        setCollectionErrorStates('Unable to load admin data right now. Please refresh the page or sign in again.');
         showMessage(error.message || 'Unable to load admin data.', 'error');
       });
   }

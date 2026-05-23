@@ -68,7 +68,7 @@
   }
 
   function extractRestaurantsFromDom() {
-    return Array.from(document.querySelectorAll('.restaurant-card')).map((card) => ({
+    return Array.from(restaurantsSection.querySelectorAll('.restaurant-card')).map((card) => ({
       name: card.querySelector('h3')?.textContent.trim() || 'Restaurant',
       image: card.querySelector('img')?.getAttribute('src') || '',
       cuisines: card.querySelector('.cuisine')?.textContent.trim() || '',
@@ -176,11 +176,25 @@
     `).join('');
   }
 
+  function initFromDom() {
+    const domRestaurants = extractRestaurantsFromDom();
+    if (domRestaurants.length === 0) {
+      return;
+    }
+    currentRestaurants = domRestaurants.map((restaurant) => ({
+      ...normalizeRestaurantRecord(restaurant),
+      categories: getRestaurantCategories(normalizeRestaurantRecord(restaurant))
+    }));
+  }
+
   function applyCategoryView() {
     Array.from(restaurantsSection.querySelectorAll('.restaurant-card')).forEach((card, index) => {
       const restaurant = currentRestaurants[index];
+      if (!restaurant) {
+        return;
+      }
       const visible = activeCategory === 'all' || restaurant.categories.includes(activeCategory);
-      card.style.display = visible ? 'block' : 'none';
+      card.style.display = visible ? '' : 'none';
     });
   }
 
@@ -197,11 +211,23 @@
     });
   });
 
-  Promise.resolve()
-    .then(fetchCanonicalRestaurants)
-    .catch(() => ensureRestaurantsStorage())
+  // Step 1: immediately register the existing HTML cards so category filtering
+  // works right away without waiting for the API response.
+  initFromDom();
+
+  // Step 2: fetch canonical data from the API in the background.
+  // Only replace the DOM if the API returns a non-empty list of restaurants.
+  // If the API fails or returns nothing, the static HTML cards remain visible.
+  fetchCanonicalRestaurants()
     .then((restaurants) => {
-      renderRestaurants(restaurants);
-      applyCategoryView();
+      if (Array.isArray(restaurants) && restaurants.length > 0) {
+        renderRestaurants(restaurants);
+        applyCategoryView();
+      }
+    })
+    .catch(() => {
+      // API unavailable — persist what is already in the DOM to localStorage
+      // so search.js and other scripts can use it, but do NOT touch the DOM.
+      ensureRestaurantsStorage();
     });
 })();

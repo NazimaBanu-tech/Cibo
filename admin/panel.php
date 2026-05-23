@@ -80,6 +80,14 @@ function cibo_admin_panel_date_input(?string $value): string
     return date('Y-m-d', $timestamp);
 }
 
+function cibo_admin_customer_home_url(): string
+{
+    $adminBase = rtrim((string) CIBO_ADMIN_BASE, '/');
+    $siteBase = preg_replace('#/admin$#', '', $adminBase) ?? '';
+
+    return ($siteBase !== '' ? $siteBase : '') . '/index.php';
+}
+
 function cibo_admin_collect_image_paths(string $relativeDirectory, bool $recursive = true): array
 {
     $baseDirectory = realpath(__DIR__ . '/../' . trim($relativeDirectory, '/\\'));
@@ -388,7 +396,7 @@ $menuImageSuggestions = cibo_admin_collect_image_paths('images/food-items', true
         <div class="brand-copy">
           <h1>Cibo</h1>
           <p>Premium admin panel</p>
-          <a href="/food-app/index.php" class="brand-switch">View site</a>
+          <a href="<?= cibo_admin_panel_h(cibo_admin_customer_home_url()) ?>" class="brand-switch">View site</a>
         </div>
       </div>
 
@@ -414,20 +422,72 @@ $menuImageSuggestions = cibo_admin_collect_image_paths('images/food-items', true
         <div class="content-head">
           <div>
             <h2>Dashboard</h2>
-            <p>Track the health of Cibo at a glance with quick numbers for orders, revenue, users, and restaurant coverage.</p>
+            <p>Monitor live food-delivery operations with a clearer view of revenue, fulfilment flow, customer reach, and restaurant coverage.</p>
           </div>
         </div>
 
-        <div class="stat-grid">
+        <article class="panel-card dashboard-hero-card">
+          <div class="dashboard-hero-copy">
+            <span class="dashboard-kicker">Operations overview</span>
+            <h3>One calm control room for orders, kitchens, delivery, and growth.</h3>
+            <p>Every dashboard metric below is rendered from the same backend order truth powering the rest of the admin panel.</p>
+          </div>
+          <div class="dashboard-hero-pills">
+            <div class="dashboard-hero-pill">
+              <span>Revenue source</span>
+              <strong>Final order amount</strong>
+            </div>
+            <div class="dashboard-hero-pill">
+              <span>Status source</span>
+              <strong>Canonical backend lifecycle</strong>
+            </div>
+            <div class="dashboard-hero-pill">
+              <span>View mode</span>
+              <strong>Live operations snapshot</strong>
+            </div>
+          </div>
+        </article>
+
+        <div class="stat-grid dashboard-stat-grid">
+          <button class="admin-card stat-card stat-card-primary" type="button" data-stat-target="revenue">
+            <span>Total Revenue</span>
+            <strong id="stat-revenue">₹0</strong>
+            <small>All non-cancelled completed order value</small>
+          </button>
+          <button class="admin-card stat-card" type="button" data-stat-target="today_revenue">
+            <span>Today Revenue</span>
+            <strong id="stat-today-revenue">₹0</strong>
+            <small>Today's live sales total</small>
+          </button>
           <button class="admin-card stat-card" type="button" data-stat-target="orders">
             <span>Total Orders</span>
             <strong id="stat-orders">0</strong>
             <small>All recorded customer orders</small>
           </button>
-          <button class="admin-card stat-card" type="button" data-stat-target="revenue">
-            <span>Total Revenue</span>
-            <strong id="stat-revenue">₹0</strong>
-            <small>Order totals processed so far</small>
+          <button class="admin-card stat-card" type="button" data-stat-target="placed">
+            <span>Pending Orders</span>
+            <strong id="stat-placed-orders">0</strong>
+            <small>Newly placed and awaiting fulfilment</small>
+          </button>
+          <button class="admin-card stat-card" type="button" data-stat-target="preparing">
+            <span>Preparing Orders</span>
+            <strong id="stat-preparing-orders">0</strong>
+            <small>Orders currently in kitchen prep</small>
+          </button>
+          <button class="admin-card stat-card" type="button" data-stat-target="out_for_delivery">
+            <span>Out for Delivery</span>
+            <strong id="stat-out-for-delivery-orders">0</strong>
+            <small>Orders on the road right now</small>
+          </button>
+          <button class="admin-card stat-card" type="button" data-stat-target="delivered">
+            <span>Delivered Orders</span>
+            <strong id="stat-delivered-orders">0</strong>
+            <small>Successfully completed deliveries</small>
+          </button>
+          <button class="admin-card stat-card" type="button" data-stat-target="cancelled">
+            <span>Cancelled Orders</span>
+            <strong id="stat-cancelled-orders">0</strong>
+            <small>Orders closed before fulfilment</small>
           </button>
           <button class="admin-card stat-card" type="button" data-stat-target="users">
             <span>Total Users</span>
@@ -444,12 +504,80 @@ $menuImageSuggestions = cibo_admin_collect_image_paths('images/food-items', true
         <div class="panel-card dashboard-detail-card">
           <div class="toolbar">
             <div>
-              <h3 id="dashboard-detail-title">Orders Snapshot</h3>
-              <p id="dashboard-detail-copy">Click a dashboard card to explore the matching details.</p>
+              <h3 id="dashboard-detail-title">Operations Snapshot</h3>
+              <p id="dashboard-detail-copy">Click a dashboard card to inspect the matching operational detail.</p>
             </div>
             <button class="button-secondary" type="button" id="dashboard-detail-action">Open Orders</button>
           </div>
           <div class="dashboard-detail-body" id="dashboard-detail-body"></div>
+        </div>
+
+        <div class="dashboard-insight-grid">
+          <article class="panel-card dashboard-mini-card">
+            <span>Today's Orders</span>
+            <strong id="insight-today-orders">0</strong>
+            <small>Orders created today</small>
+          </article>
+          <article class="panel-card dashboard-mini-card">
+            <span>Yesterday's Orders</span>
+            <strong id="insight-yesterday-orders">0</strong>
+            <small>Orders created yesterday</small>
+          </article>
+          <article class="panel-card dashboard-mini-card">
+            <span>Weekly Orders</span>
+            <strong id="insight-weekly-orders">0</strong>
+            <small>Last 7 days of order volume</small>
+          </article>
+          <article class="panel-card dashboard-mini-card">
+            <span>Weekly Revenue</span>
+            <strong id="insight-weekly-revenue">₹0</strong>
+            <small>Last 7 days of revenue</small>
+          </article>
+          <article class="panel-card dashboard-mini-card">
+            <span>Monthly Revenue</span>
+            <strong id="insight-monthly-revenue">₹0</strong>
+            <small>Current month revenue</small>
+          </article>
+          <article class="panel-card dashboard-mini-card">
+            <span>Cancellation Rate</span>
+            <strong id="insight-cancellation-rate">0%</strong>
+            <small>Cancelled orders out of total orders</small>
+          </article>
+        </div>
+
+        <div class="dashboard-analytics-grid">
+          <article class="panel-card dashboard-report-card dashboard-export-card">
+            <div class="toolbar">
+              <div>
+                <h3>Sales Reports</h3>
+                <p>Download printable and spreadsheet-ready exports using the same backend sales truth as this dashboard.</p>
+              </div>
+            </div>
+            <div class="dashboard-export-actions">
+              <a class="button-secondary dashboard-export-btn" href="api/sales-report.php?format=pdf">Download PDF</a>
+              <a class="button-secondary dashboard-export-btn" href="api/sales-report.php?format=csv">Export CSV</a>
+            </div>
+          </article>
+
+          <article class="panel-card dashboard-report-card">
+            <div class="toolbar">
+              <div>
+                <h3>Top Restaurants</h3>
+                <p>Leading restaurants by total order count.</p>
+              </div>
+            </div>
+            <div class="dashboard-report-list" id="dashboard-top-restaurants"></div>
+          </article>
+
+          <article class="panel-card dashboard-report-card">
+            <div class="toolbar">
+              <div>
+                <h3>Recent Activity</h3>
+                <p>The latest five orders from the live backend order feed.</p>
+              </div>
+            </div>
+            <div class="dashboard-report-list" id="dashboard-recent-activity"></div>
+          </article>
         </div>
       </section>
 
@@ -616,6 +744,8 @@ $menuImageSuggestions = cibo_admin_collect_image_paths('images/food-items', true
                   <th>Order ID</th>
                   <th>User</th>
                   <th>Items</th>
+                  <th>Delivery</th>
+                  <th>Payment</th>
                   <th>Total</th>
                   <th>Status</th>
                 </tr>

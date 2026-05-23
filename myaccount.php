@@ -113,7 +113,7 @@ if (!cibo_current_user()) {
       color: #2a2723;
       cursor: pointer;
       text-align: left;
-      transition: 0.2s ease;
+      transition: background-color 0.22s ease, color 0.22s ease, border-color 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
     }
 
     .sidebar-link:hover {
@@ -195,6 +195,8 @@ if (!cibo_current_user()) {
       background: var(--accent);
       border-color: var(--accent);
       color: white;
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(95, 124, 58, 0.12);
     }
 
     .account-btn.primary {
@@ -206,6 +208,13 @@ if (!cibo_current_user()) {
     .account-btn.primary:hover {
       background: #4e682e;
       border-color: #4e682e;
+      box-shadow: 0 14px 26px rgba(78, 104, 46, 0.18);
+    }
+
+    .account-btn:focus-visible,
+    .sidebar-link:focus-visible {
+      outline: 3px solid rgba(95, 124, 58, 0.2);
+      outline-offset: 3px;
     }
 
     .orders-list,
@@ -392,6 +401,24 @@ if (!cibo_current_user()) {
       margin-bottom: 4px;
     }
 
+    .detail-item-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .detail-item-thumb {
+      width: 54px;
+      height: 54px;
+      border-radius: 16px;
+      object-fit: cover;
+      background: #f6f1e8;
+      flex-shrink: 0;
+      display: block;
+    }
+
     .empty-state {
       background: #f6f1e8;
       border-color: #e7dfd3;
@@ -455,6 +482,20 @@ if (!cibo_current_user()) {
       font-size: 14px;
       font-weight: 700;
       color: var(--accent);
+    }
+
+    .section-note.error {
+      color: #a84747;
+    }
+
+    .section-note.success {
+      color: var(--accent);
+    }
+
+    .status-badge.is-cancelled {
+      background: #fbefea;
+      border-color: #e4bdb1;
+      color: #b05a44;
     }
 
     @media (max-width: 980px) {
@@ -587,14 +628,15 @@ if (!cibo_current_user()) {
 
         <section class="account-main">
           <div class="section-panel active" id="panel-orders">
-            <div class="section-head">
-              <div>
-                <h2>Past Orders</h2>
-                <p>See your recent orders, open the item breakdown, and reorder the same meal back into your cart.</p>
-              </div>
+          <div class="section-head">
+            <div>
+              <h2>Past Orders</h2>
+              <p>See your recent orders, open the item breakdown, and reorder the same meal back into your cart.</p>
             </div>
-            <div class="orders-list" id="orders-list"></div>
           </div>
+          <p class="section-note" id="orders-note" style="display: none;"></p>
+          <div class="orders-list" id="orders-list"></div>
+        </div>
 
           <div class="section-panel" id="panel-favorites">
             <div class="section-head">
@@ -649,6 +691,14 @@ if (!cibo_current_user()) {
                   <div class="form-group full">
                     <label for="address-landmark">Landmark</label>
                     <input id="address-landmark" name="landmark" type="text" placeholder="Nearby landmark">
+                  </div>
+                  <div class="form-group">
+                    <label for="address-city">City</label>
+                    <input id="address-city" name="city" type="text" placeholder="Enter your city">
+                  </div>
+                  <div class="form-group">
+                    <label for="address-pincode">Pincode</label>
+                    <input id="address-pincode" name="pincode" type="text" inputmode="numeric" maxlength="6" placeholder="Enter your pincode">
                   </div>
                 </div>
                 <div class="form-actions">
@@ -741,11 +791,12 @@ if (!cibo_current_user()) {
   <script src="favorites.js"></script>
   <script src="order-api.js"></script>
   <script src="account-api.js"></script>
+  <script src="cart-manager.js"></script>
   <script>
     (() => {
-      const CART_KEY = 'cibo_cart';
       const ACCOUNT_VIEW_KEY = 'cibo_myaccount_view';
       const favoritesApi = window.CiboFavorites;
+      const cartManager = window.CiboCartManager;
 
       const sidebarLinks = Array.from(document.querySelectorAll('.sidebar-link'));
       const panels = {
@@ -755,6 +806,7 @@ if (!cibo_current_user()) {
         settings: document.getElementById('panel-settings')
       };
       const ordersList = document.getElementById('orders-list');
+      const ordersNote = document.getElementById('orders-note');
       const favoriteItemsList = document.getElementById('favorite-items-list');
       const addressesList = document.getElementById('addresses-list');
       const addressFormCard = document.getElementById('address-form-card');
@@ -773,6 +825,9 @@ if (!cibo_current_user()) {
       let isAuthenticated = false;
       let isAddressSaving = false;
       let isAccountSaving = false;
+      let isOrdersRefreshing = false;
+      let isOrderCancelling = false;
+      let lastOrdersRefreshAt = 0;
 
       function readJSON(key, fallback) {
         try {
@@ -862,6 +917,24 @@ if (!cibo_current_user()) {
         accountSubmitButton.textContent = isAccountSaving ? 'Saving Changes...' : 'Save Changes';
       }
 
+      function getOrderCancellationMessage(error) {
+        const safeMessage = String(error?.message || '').trim();
+
+        if (/only newly placed orders can be cancelled/i.test(safeMessage)) {
+          return 'This order has already progressed and can no longer be cancelled.';
+        }
+
+        if (/unable to find the order/i.test(safeMessage) || /order not found/i.test(safeMessage)) {
+          return 'We could not find that order anymore. Please refresh your order history.';
+        }
+
+        if (!navigator.onLine) {
+          return 'Network connection lost. Please check your internet and try again.';
+        }
+
+        return safeMessage || 'Unable to cancel the order right now. Please try again.';
+      }
+
       function normalizeItems(items) {
         if (Array.isArray(items)) {
           return items.filter((item) => item && typeof item === 'object');
@@ -907,18 +980,48 @@ if (!cibo_current_user()) {
 
             return {
               id: order.order_number || order.id,
+              orderNumber: order.order_number || order.id,
               restaurant: order.restaurant_name || 'Cibo Order',
               total: Number(order.total_amount) || 0,
               summary,
               items,
+              deliveryAddress: String(order.delivery_address || '').trim(),
               date: displayDate,
-              status: order.order_status_label || 'Pending'
+              rawStatus: String(order.order_status || '').trim().toLowerCase(),
+              status: order.order_status_label || order.order_status || '--',
+              paymentStatus: order.payment_status_label || order.payment_status || '--',
+              receiptViewUrl: String(order.receipt_view_url || '').trim(),
+              receiptDownloadUrl: String(order.receipt_download_url || '').trim(),
+              canCancel: String(order.order_status || '').trim().toLowerCase() === 'placed'
             };
           });
 
           serverOrdersCache = normalizedOrders.length ? normalizedOrders : null;
         } catch (error) {
           serverOrdersCache = null;
+          throw error;
+        }
+      }
+
+      async function refreshOrdersAndRender(options = {}) {
+        if (isOrdersRefreshing) {
+          return;
+        }
+
+        const now = Date.now();
+        const force = options.force === true;
+
+        if (!force && now - lastOrdersRefreshAt < 1200) {
+          return;
+        }
+
+        try {
+          isOrdersRefreshing = true;
+          await loadOrders();
+          lastOrdersRefreshAt = Date.now();
+          renderOrders();
+        } finally {
+          isOrdersRefreshing = false;
         }
       }
 
@@ -969,7 +1072,7 @@ if (!cibo_current_user()) {
         const orders = readOrders();
 
         if (!orders.length) {
-          ordersList.innerHTML = '<div class="empty-state">No orders yet. Your completed checkouts will appear here for quick reordering.</div>';
+          ordersList.innerHTML = '<div class="empty-state">No orders yet. Your Cibo order history will appear here after your first completed checkout.</div>';
           return;
         }
 
@@ -980,15 +1083,18 @@ if (!cibo_current_user()) {
                 const lineTotal = (Number(item.price) || 0) * quantity;
                 return `
                   <div class="detail-row">
-                    <div>
+                    <div class="detail-item-main">
+                      ${item.image ? `<img class="detail-item-thumb" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name || 'Item')}">` : ''}
+                      <div>
                       <strong>${escapeHtml(item.name || 'Item')}</strong>
                       <span>Qty: ${quantity}</span>
+                      </div>
                     </div>
                     <span>${formatPrice(lineTotal)}</span>
                   </div>
                 `;
               }).join('')
-            : '<div class="empty-state">No item details available</div>';
+            : '<div class="empty-state">Order item details are not available for this entry yet.</div>';
 
           return `
             <article class="order-card">
@@ -997,19 +1103,33 @@ if (!cibo_current_user()) {
                   <h3>${escapeHtml(order.restaurant)}</h3>
                   <p class="order-summary">${escapeHtml(order.summary)}</p>
                   <div class="meta-row">
+                    <span class="meta-pill">#${escapeHtml(order.orderNumber || order.id || '--')}</span>
                     <span class="meta-pill">${escapeHtml(order.date)}</span>
+                    <span class="meta-pill">${escapeHtml(order.paymentStatus || '--')}</span>
                     <span class="meta-pill">${formatPrice(order.total)}</span>
                   </div>
                 </div>
-                <span class="status-badge">${escapeHtml(order.status)}</span>
+                <span class="status-badge ${order.rawStatus === 'cancelled' ? 'is-cancelled' : ''}">${escapeHtml(order.status)}</span>
               </div>
               <div class="order-actions">
                 <button class="account-btn" type="button" data-action="toggle-order" data-index="${index}">View Details</button>
+                ${order.receiptViewUrl ? `<a class="account-btn" href="${escapeHtml(order.receiptViewUrl)}">View Receipt</a>` : ''}
+                ${order.receiptDownloadUrl ? `<a class="account-btn" href="${escapeHtml(order.receiptDownloadUrl)}">Download PDF</a>` : ''}
+                ${order.canCancel ? `<button class="account-btn" type="button" data-action="cancel-order" data-index="${index}">Cancel Order</button>` : ''}
                 <button class="account-btn primary" type="button" data-action="reorder" data-index="${index}">Reorder</button>
               </div>
               <div class="detail-box" id="order-detail-${index}">
                 <h4>Order Details</h4>
                 ${detailMarkup}
+                ${order.deliveryAddress ? `
+                  <div class="detail-row">
+                    <div>
+                      <strong>Delivery Address</strong>
+                      <span>${escapeHtml(order.deliveryAddress)}</span>
+                    </div>
+                    <span></span>
+                  </div>
+                ` : ''}
                 <div class="detail-total">
                   <span>Total</span>
                   <span>${formatPrice(order.total)}</span>
@@ -1024,7 +1144,7 @@ if (!cibo_current_user()) {
         const favorites = favoritesApi?.readFavorites?.() || { items: [] };
 
         if (!favorites.items.length) {
-          favoriteItemsList.innerHTML = '<div class="empty-state">No favorite dishes yet. Save a meal from any menu and it will show up here.</div>';
+          favoriteItemsList.innerHTML = '<div class="empty-state">No saved favorites yet. Add a dish from any menu to keep it close for your next order.</div>';
           return;
         }
 
@@ -1092,7 +1212,7 @@ if (!cibo_current_user()) {
         const addresses = normalizeAddresses();
 
         if (!addresses.length) {
-          addressesList.innerHTML = '<div class="empty-state">No saved addresses yet. Add one here to speed up your next checkout.</div>';
+          addressesList.innerHTML = '<div class="empty-state">No saved addresses yet. Add your delivery details here to make checkout faster next time.</div>';
           return;
         }
 
@@ -1106,6 +1226,7 @@ if (!cibo_current_user()) {
                 <h3>${escapeHtml(address.name || 'Saved Address')}</h3>
                 <p class="address-copy">${escapeHtml(address.address || 'Address not available')}</p>
                 <p class="address-copy">${escapeHtml(address.landmark ? 'Landmark: ' + address.landmark : 'Landmark not added')}</p>
+                <p class="address-copy">${escapeHtml(address.city ? 'City: ' + address.city : 'City not added')}${address.pincode ? escapeHtml(' | Pincode: ' + address.pincode) : ''}</p>
                 <p class="address-copy">${escapeHtml(address.phone ? 'Phone: ' + address.phone : 'Phone not added')}</p>
               </div>
             </div>
@@ -1128,6 +1249,8 @@ if (!cibo_current_user()) {
         addressForm.elements.phone.value = address?.phone || '';
         addressForm.elements.address.value = address?.address || '';
         addressForm.elements.landmark.value = address?.landmark || '';
+        addressForm.elements.city.value = address?.city || '';
+        addressForm.elements.pincode.value = address?.pincode || '';
         addressFormTitle.textContent = address?.id ? 'Edit Address' : 'Add Address';
         setSectionNote(addressNote, '');
         addressFormCard.style.display = 'block';
@@ -1248,7 +1371,9 @@ if (!cibo_current_user()) {
           name: addressForm.elements.name.value.trim(),
           phone: addressForm.elements.phone.value.trim(),
           address: addressForm.elements.address.value.trim(),
-          landmark: addressForm.elements.landmark.value.trim()
+          landmark: addressForm.elements.landmark.value.trim(),
+          city: addressForm.elements.city.value.trim(),
+          pincode: addressForm.elements.pincode.value.trim()
         };
 
         try {
@@ -1348,13 +1473,55 @@ if (!cibo_current_user()) {
             return;
           }
 
-          saveJSON(CART_KEY, buildCartFromOrder(order));
-          window.dispatchEvent(new Event('cibo-cart-updated'));
+          cartManager?.setCart(buildCartFromOrder(order), {
+            source: 'myaccount-reorder'
+          });
           actionTarget.textContent = 'Added to Cart';
 
           window.setTimeout(() => {
             actionTarget.textContent = 'Reorder';
           }, 1400);
+        }
+
+        if (action === 'cancel-order') {
+          const orders = readOrders();
+          const order = orders[index];
+
+          if (!order || !order.canCancel || !window.CiboOrdersApi || isOrderCancelling) {
+            return;
+          }
+
+          const shouldCancel = window.confirm('Are you sure you want to cancel this order?');
+
+          if (!shouldCancel) {
+            return;
+          }
+
+          isOrderCancelling = true;
+          setSectionNote(ordersNote, '');
+          actionTarget.disabled = true;
+          actionTarget.textContent = 'Cancelling...';
+
+          window.CiboOrdersApi.cancel(order.orderNumber || order.id)
+            .then(() => refreshOrdersAndRender({ force: true }))
+            .then(() => {
+              setSectionNote(ordersNote, 'Order cancelled successfully.', 'success');
+            })
+            .catch((error) => {
+              if (error?.ciboAuthError) {
+                handleUnauthorized();
+                return;
+              }
+
+              setSectionNote(ordersNote, getOrderCancellationMessage(error), 'error');
+            })
+            .finally(() => {
+              isOrderCancelling = false;
+              actionTarget.disabled = false;
+              if (actionTarget.textContent === 'Cancelling...') {
+                actionTarget.textContent = 'Cancel Order';
+              }
+            });
         }
 
         if (action === 'edit-address') {
@@ -1428,6 +1595,28 @@ if (!cibo_current_user()) {
 
       window.addEventListener('hashchange', () => {
         setActiveView(window.location.hash.replace(/^#/, ''), { persist: false });
+      });
+
+      window.addEventListener('pageshow', () => {
+        if (normalizeView(window.location.hash.replace(/^#/, '')) === 'orders') {
+          refreshOrdersAndRender({ force: true }).catch((error) => {
+            if (error?.ciboAuthError) {
+              handleUnauthorized();
+            }
+          });
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        if (normalizeView(window.location.hash.replace(/^#/, '')) === 'orders') {
+          refreshOrdersAndRender().catch(() => null);
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && normalizeView(window.location.hash.replace(/^#/, '')) === 'orders') {
+          refreshOrdersAndRender().catch(() => null);
+        }
       });
     })();
   </script>

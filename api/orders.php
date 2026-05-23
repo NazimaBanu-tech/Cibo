@@ -41,6 +41,18 @@ try {
         ]);
     }
 
+    if (($input['action'] ?? '') === 'cancel') {
+        cibo_start_user_session();
+        cibo_request_guard_begin('customer-order-cancel');
+        $order = cibo_cancel_order_for_session((string) ($input['order_number'] ?? ''));
+        cibo_request_guard_finish('customer-order-cancel', true);
+
+        cibo_json_response([
+            'success' => true,
+            'order' => $order,
+        ]);
+    }
+
     cibo_start_user_session();
     cibo_request_guard_begin('customer-order-create');
     $order = cibo_create_order($input);
@@ -51,6 +63,9 @@ try {
         'order' => $order,
     ], 201);
 } catch (Throwable $exception) {
+    if (($input['action'] ?? '') === 'cancel') {
+        cibo_request_guard_finish('customer-order-cancel', false);
+    }
     cibo_request_guard_finish('customer-order-create', false);
     cibo_json_response([
         'success' => false,

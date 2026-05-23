@@ -1,13 +1,11 @@
 (async () => {
-  const STORAGE_KEY = 'cibo_cart';
-  const LEGACY_STORAGE_KEY = 'cart';
   const SUMMARY_KEY = 'cibo_summary';
   const PROMO_KEY = 'cibo_promo';
   const CHECKOUT_SNAPSHOT_KEY = 'cibo_checkout_snapshot';
   const CHECKOUT_INTENT_KEY = 'cibo_checkout_intent';
   const CHECKOUT_DRAFT_KEY = 'cibo_checkout_draft';
-  const CART_COUNT_KEY = 'cartCount';
   const LAST_ORDER_KEY = 'cibo_last_order';
+  const cartManager = window.CiboCartManager;
 
   const form = document.getElementById('checkout-form');
   const orderSummaryCard = document.querySelector('.order-summary-card');
@@ -17,17 +15,14 @@
   const initialPlaceOrderButton = document.getElementById('place-order-btn');
   const UPI_ID = 'naz@cibo';
   const UPI_PAYEE_NAME = 'Cibo';
-  const UPI_URI = `upi://pay?pa=${UPI_ID}&pn=${UPI_PAYEE_NAME}`;
-  const UPI_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(UPI_URI)}`;
   const BUTTON_LABELS = {
     cod: 'Place Order',
     card: 'Pay Securely',
     upi: 'Complete Payment',
     cardProcessing: 'Processing Payment...',
-    cardSuccess: 'Payment Successful \u2713',
-    upiProcessing: 'Verifying Payment...',
-    upiSuccess: 'Payment Successful \u2713'
+    upiProcessing: 'Processing Payment...'
   };
+  const CHECKOUT_DEBUG_ENABLED = window.CIBO_CHECKOUT_DEBUG === true;
 
   if (!form || !orderSummaryCard || !paymentOptions || !paymentInputs.length || !formMessage || !initialPlaceOrderButton) {
     return;
@@ -46,13 +41,41 @@
   let upiIdInput = null;
   let upiIdErrorNode = null;
   let upiStatusNode = null;
+  let upiQrStateBadgeNode = null;
+  let upiQrHintNode = null;
+  let upiProcessingPanel = null;
+  let upiProcessingTitleNode = null;
+  let upiProcessingStepNodes = [];
+  let upiSuccessPanel = null;
+  let upiSuccessAmountNode = null;
+  let upiSuccessReferenceNode = null;
+  let upiSuccessTimeNode = null;
   let upiQrScanned = false;
   let cardSimulationStatus = 'idle';
   let cardVerificationTimer = null;
   let cardStatusNode = null;
+  let cardHolderInput = null;
+  let cardNumberInput = null;
+  let cardExpiryInput = null;
+  let cardCvvInput = null;
+  let cardPreviewNode = null;
+  let cardAmountNode = null;
+  let cardProcessingPanel = null;
+  let cardProcessingTitleNode = null;
+  let cardProcessingStepNodes = [];
+  let cardOtpPanel = null;
+  let cardOtpInput = null;
+  let cardOtpErrorNode = null;
+  let cardOtpVerifyButton = null;
+  let cardSuccessPanel = null;
+  let cardSuccessAmountNode = null;
+  let cardSuccessMaskedNode = null;
+  let cardSuccessReferenceNode = null;
+  let cardSuccessTimeNode = null;
   let selectedAddressId = 0;
   let isAuthenticated = false;
   let availableAddresses = [];
+  let currentUserEmail = '';
   let selectedPaymentMethod = paymentInputs.find((input) => input.checked)?.value || '';
   let orderSubmissionInFlight = false;
 
@@ -60,8 +83,14 @@
     return 'cibo-order-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   }
 
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
   function debugCheckout(message, details) {
-    if (typeof console === 'undefined' || typeof console.debug !== 'function') {
+    if (!CHECKOUT_DEBUG_ENABLED || typeof console === 'undefined' || typeof console.debug !== 'function') {
       return;
     }
 
@@ -306,16 +335,15 @@
   }
 
   function clearPlacedOrderState() {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    cartManager?.clearCart({
+      source: 'checkout-order-complete'
+    });
     localStorage.removeItem(SUMMARY_KEY);
     localStorage.removeItem(PROMO_KEY);
     localStorage.removeItem(CHECKOUT_SNAPSHOT_KEY);
-    localStorage.removeItem(CART_COUNT_KEY);
     sessionStorage.removeItem(CHECKOUT_SNAPSHOT_KEY);
     sessionStorage.removeItem(CHECKOUT_INTENT_KEY);
     clearCheckoutDraft();
-    window.dispatchEvent(new Event('cibo-cart-updated'));
   }
 
   function formatPrice(amount) {
@@ -332,27 +360,7 @@
   }
 
   function getCartItems() {
-    const cart = readJSON(STORAGE_KEY, null);
-    const legacyCart = readJSON(LEGACY_STORAGE_KEY, null);
-    const checkoutSnapshot = readJSON(CHECKOUT_SNAPSHOT_KEY, null) || readSessionJSON(CHECKOUT_SNAPSHOT_KEY, null);
-    const snapshotCart = checkoutSnapshot?.cart && typeof checkoutSnapshot.cart === 'object'
-      ? checkoutSnapshot.cart
-      : null;
-    const effectiveCart = cart && typeof cart === 'object'
-      ? cart
-      : (legacyCart && typeof legacyCart === 'object'
-        ? legacyCart
-        : (snapshotCart && typeof snapshotCart === 'object' ? snapshotCart : {}));
-
-    if (!localStorage.getItem(STORAGE_KEY) && legacyCart && typeof legacyCart === 'object') {
-      writeJSON(STORAGE_KEY, legacyCart);
-    }
-
-    if (!localStorage.getItem(STORAGE_KEY) && snapshotCart && typeof snapshotCart === 'object') {
-      writeJSON(STORAGE_KEY, snapshotCart);
-    }
-
-    return Object.values(effectiveCart).filter((item) => Number(item?.quantity) > 0);
+    return cartManager ? cartManager.getItems() : [];
   }
 
   function normalizedAddressValue(value) {
@@ -471,27 +479,74 @@
   }
 
   function getUpiStatusMessage() {
+    if (upiSimulationStatus === 'scanning') {
+      return 'Scanning QR... Hold steady while we prepare the UPI request.';
+    }
+
     if (upiSimulationStatus === 'processing') {
-      return 'Verifying Payment...';
+      return 'Waiting for approval in your UPI app...';
     }
 
     if (upiSimulationStatus === 'success') {
-      return 'Payment Successful \u2713';
+      return 'UPI payment approved. Finalizing your order...';
     }
 
-    return '';
+    return 'Scan the QR or enter a valid UPI ID to continue with your UPI payment.';
   }
 
   function getCardStatusMessage() {
     if (cardSimulationStatus === 'processing') {
-      return 'Processing Payment...';
+      return 'Processing your card payment...';
     }
 
-    if (cardSimulationStatus === 'success') {
-      return 'Payment Successful \u2713';
+    return 'Your card selection will continue through the normal checkout flow.';
+  }
+
+  function setUpiVisualState(state, options = {}) {
+    upiSimulationStatus = state;
+
+    if (upiSimCard) {
+      upiSimCard.dataset.upiState = state;
     }
 
-    return '';
+    if (upiQrButton) {
+      upiQrButton.classList.toggle('is-selected', state !== 'idle');
+    }
+
+    if (upiQrStateBadgeNode) {
+      const badgeLabel = options.badge || (
+        state === 'scanning'
+          ? 'Scanning QR'
+          : state === 'processing'
+            ? 'Waiting for approval'
+            : state === 'success'
+              ? 'Paid'
+              : 'Ready'
+      );
+      upiQrStateBadgeNode.textContent = badgeLabel;
+    }
+
+    if (upiQrHintNode) {
+      const hintLabel = options.hint || (
+        state === 'scanning'
+          ? 'Preparing the UPI QR for scan.'
+          : state === 'processing'
+            ? 'Collect request sent. Approve the payment to continue.'
+            : state === 'success'
+              ? 'Payment approved successfully.'
+              : 'Scan using any UPI app or enter your UPI ID below.'
+      );
+      upiQrHintNode.textContent = hintLabel;
+    }
+
+    if (upiStatusNode) {
+      upiStatusNode.textContent = options.status || getUpiStatusMessage();
+      upiStatusNode.className = 'upi-sim-status'
+        + (state === 'scanning' || state === 'processing' ? ' is-processing' : '')
+        + (state === 'success' ? ' is-success' : '');
+    }
+
+    updatePlaceOrderButton();
   }
 
   function sanitizeUpiId(value) {
@@ -502,6 +557,94 @@
     return /^[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}$/i.test(value);
   }
 
+  function sanitizeCardholderName(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  }
+
+  function sanitizeCardNumber(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 16);
+  }
+
+  function formatCardNumber(value) {
+    return sanitizeCardNumber(value).replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+  }
+
+  function sanitizeExpiry(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 4);
+
+    if (digits.length <= 2) {
+      return digits;
+    }
+
+    return digits.slice(0, 2) + '/' + digits.slice(2);
+  }
+
+  function sanitizeCvv(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 3);
+  }
+
+  function detectCardType(cardNumber) {
+    const digits = sanitizeCardNumber(cardNumber);
+
+    if (/^4/.test(digits)) {
+      return 'Visa';
+    }
+
+    if (/^(5[1-5]|2[2-7])/.test(digits)) {
+      return 'Mastercard';
+    }
+
+    if (/^6/.test(digits)) {
+      return 'RuPay';
+    }
+
+    return 'Card';
+  }
+
+  function cardPreviewLabel(cardNumber) {
+    const digits = sanitizeCardNumber(cardNumber);
+
+    if (digits.length < 4) {
+      return 'Enter your card details to preview the masked payment method.';
+    }
+
+    return `${detectCardType(digits)} ending in ${digits.slice(-4)}`;
+  }
+
+  function isValidExpiry(value) {
+    const normalized = sanitizeExpiry(value);
+
+    if (!/^\d{2}\/\d{2}$/.test(normalized)) {
+      return false;
+    }
+
+    const [monthText, yearText] = normalized.split('/');
+    const month = Number(monthText);
+    const year = Number(yearText);
+
+    if (month < 1 || month > 12) {
+      return false;
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear() % 100;
+    const currentMonth = now.getMonth() + 1;
+
+    if (year < currentYear) {
+      return false;
+    }
+
+    if (year === currentYear && month < currentMonth) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function createSimulatedCardReference() {
+    return 'CARDTXN' + Math.floor(100000 + Math.random() * 900000);
+  }
+
   function getUpiIdMessage() {
     if (!upiIdInput) {
       return '';
@@ -510,11 +653,11 @@
     const normalized = sanitizeUpiId(upiIdInput.value);
 
     if (!normalized) {
-      return upiQrScanned ? '' : 'Scan QR or enter UPI ID';
+      return 'UPI ID is required';
     }
 
     if (!isValidUpiId(normalized)) {
-      return 'Enter a valid UPI ID';
+      return 'Enter a valid UPI ID like name@bank';
     }
 
     return '';
@@ -529,9 +672,9 @@
     let message = '';
 
     if (normalized && !isValidUpiId(normalized)) {
-      message = 'Enter a valid UPI ID';
-    } else if (forceRequirement && !normalized && !upiQrScanned) {
-      message = 'Scan QR or enter UPI ID';
+      message = 'Enter a valid UPI ID like name@bank';
+    } else if (forceRequirement && !normalized) {
+      message = 'UPI ID is required';
     }
 
     upiIdErrorNode.textContent = message;
@@ -562,14 +705,10 @@
     if (paymentType === 'upi') {
       if (upiSimulationStatus === 'processing') {
         label = BUTTON_LABELS.upiProcessing;
-      } else if (upiSimulationStatus === 'success') {
-        label = BUTTON_LABELS.upiSuccess;
       }
     } else if (paymentType === 'card') {
       if (cardSimulationStatus === 'processing') {
         label = BUTTON_LABELS.cardProcessing;
-      } else if (cardSimulationStatus === 'success') {
-        label = BUTTON_LABELS.cardSuccess;
       }
     }
 
@@ -640,30 +779,69 @@
         <div class="upi-sim-top">
           <div class="upi-sim-copy">
             <h4>Pay with UPI</h4>
-            <p>Scan using any UPI app</p>
+            <p>Choose your UPI app or enter your UPI ID to continue with a secure UPI payment.</p>
           </div>
-          <button type="button" class="upi-qr-button" id="upi-qr-button" aria-label="Scan the UPI QR code">
-            <div class="upi-qr">
-              <img src="${UPI_QR_URL}" alt="UPI QR code for ${UPI_ID}">
+          <div class="upi-qr-button" id="upi-qr-button" aria-label="UPI QR code" role="img">
+            <div class="upi-qr-shell">
+              <div class="upi-qr upi-qr-visual" aria-hidden="true">
+                <img class="upi-qr-static" src="images/payments/upi-qr-static.svg" alt="UPI QR code">
+              </div>
             </div>
-          </button>
+          </div>
+        </div>
+        <div class="upi-app-badges" aria-label="Supported UPI apps">
+          <span class="upi-app-badge">Google Pay</span>
+          <span class="upi-app-badge">PhonePe</span>
+          <span class="upi-app-badge">Paytm</span>
+          <span class="upi-app-badge">BHIM</span>
+        </div>
+        <div class="upi-manual-group">
+          <label for="upi-id-input">UPI ID</label>
+          <input id="upi-id-input" name="upi_id" type="text" inputmode="email" placeholder="name@bank" autocomplete="off">
+          <div class="field-error" id="upi-id-error" aria-live="polite"></div>
         </div>
         <div class="upi-sim-meta">
           <div class="upi-sim-row">
-            <span>UPI ID</span>
-            <strong>${UPI_ID}</strong>
+            <span>Payment Method</span>
+            <strong>UPI Gateway</strong>
+          </div>
+          <div class="upi-sim-row">
+            <span>Payee</span>
+            <strong>${UPI_PAYEE_NAME}</strong>
           </div>
           <div class="upi-sim-row">
             <span>Total payable</span>
             <strong id="upi-payable-amount">₹0</strong>
           </div>
         </div>
-        <div class="form-group full upi-manual-group">
-          <label for="checkout-upi-id">Enter your UPI ID</label>
-          <input id="checkout-upi-id" name="upi_id" type="text" placeholder="user@oksbi" inputmode="email" autocomplete="off">
-          <div class="field-error" data-error-for="upi_id" aria-live="polite"></div>
-        </div>
         <div class="upi-sim-status" id="upi-sim-status" aria-live="polite"></div>
+        <div class="upi-processing-panel" id="upi-processing-panel" hidden>
+          <div class="upi-processing-heading">
+            <h5 id="upi-processing-title">Preparing payment</h5>
+            <p>Please keep this page open while your UPI payment is being processed.</p>
+          </div>
+          <div class="upi-processing-steps">
+            <div class="upi-processing-step" data-step="0">Displaying QR for scan...</div>
+            <div class="upi-processing-step" data-step="1">Scanning UPI QR...</div>
+            <div class="upi-processing-step" data-step="2">Connecting to UPI app...</div>
+            <div class="upi-processing-step" data-step="3">Confirming payment...</div>
+          </div>
+        </div>
+        <div class="upi-success-panel" id="upi-success-panel" hidden>
+          <h5>Payment Successful</h5>
+          <div class="upi-success-row">
+            <span>Amount paid</span>
+            <strong id="upi-success-amount">₹0</strong>
+          </div>
+          <div class="upi-success-row">
+            <span>UPI transaction reference</span>
+            <strong id="upi-success-reference">CIBOUPI000000</strong>
+          </div>
+          <div class="upi-success-row">
+            <span>Paid at</span>
+            <strong id="upi-success-time">--</strong>
+          </div>
+        </div>
       </div>
     `;
 
@@ -672,89 +850,169 @@
     cardGrid.style.display = 'none';
     cardGrid.style.gridColumn = 'span 2';
     cardGrid.innerHTML = `
-      <div class="form-group full">
-        <label for="checkout-card-number">Card Number</label>
-        <input id="checkout-card-number" name="card_number" type="text" inputmode="numeric" placeholder="1234 5678 9012 3456" autocomplete="cc-number">
-        <div class="field-error" data-error-for="card_number" aria-live="polite"></div>
-      </div>
-      <div class="form-group full">
-        <label for="checkout-card-holder">Card Holder Name</label>
-        <input id="checkout-card-holder" name="card_holder" type="text" placeholder="" autocomplete="cc-name">
-        <div class="field-error" data-error-for="card_holder" aria-live="polite"></div>
-      </div>
-      <div class="form-group">
-        <label for="checkout-card-expiry">Expiry Date</label>
-        <input id="checkout-card-expiry" name="card_expiry" type="text" inputmode="numeric" placeholder="MM/YY" autocomplete="cc-exp">
-        <div class="field-error" data-error-for="card_expiry" aria-live="polite"></div>
-      </div>
-      <div class="form-group">
-        <label for="checkout-card-cvv">CVV</label>
-        <div class="password-field">
-          <input id="checkout-card-cvv" name="card_cvv" type="password" inputmode="numeric" placeholder="CVV" autocomplete="cc-csc" maxlength="3">
-          <button type="button" class="password-toggle" data-password-toggle="checkout-card-cvv" aria-label="Show CVV" aria-pressed="false">
-            <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-            <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 3l18 18"></path>
-              <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path>
-              <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.2 17.2 0 0 1-4.1 4.8"></path>
-              <path d="M6.2 6.2A17.6 17.6 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 5.1-1.2"></path>
-            </svg>
-          </button>
+        <div class="card-sim-card">
+        <div class="card-sim-header">
+          <div>
+            <h4>Card Payment</h4>
+            <p>Enter your card details to continue with payment.</p>
+          </div>
+          <div class="card-brand-badges" aria-label="Supported cards">
+            <span class="card-brand-badge">Visa</span>
+            <span class="card-brand-badge">Mastercard</span>
+            <span class="card-brand-badge">RuPay</span>
+          </div>
         </div>
-        <div class="field-error" data-error-for="card_cvv" aria-live="polite"></div>
+        <div class="card-sim-meta">
+          <div class="upi-sim-row">
+            <span>Payment Processor</span>
+            <strong>Card Payment</strong>
+          </div>
+          <div class="upi-sim-row">
+            <span>Security</span>
+            <strong>Secure Payment</strong>
+          </div>
+          <div class="upi-sim-row">
+            <span>Total payable</span>
+            <strong id="card-payable-amount">₹0</strong>
+          </div>
+        </div>
+        <div class="form-grid card-form-grid">
+          <div class="form-group full">
+            <label for="card-holder-name">Cardholder Name</label>
+            <input id="card-holder-name" type="text" autocomplete="cc-name" placeholder="Name on card">
+            <div class="field-error" data-error-for="cardholder"></div>
+          </div>
+          <div class="form-group full">
+            <label for="card-number">Card Number</label>
+            <input id="card-number" type="text" inputmode="numeric" autocomplete="cc-number" placeholder="1234 5678 9012 3456">
+            <div class="field-error" data-error-for="cardnumber"></div>
+          </div>
+          <div class="form-group">
+            <label for="card-expiry">Expiry Date</label>
+            <input id="card-expiry" type="text" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY">
+            <div class="field-error" data-error-for="cardexpiry"></div>
+          </div>
+          <div class="form-group">
+            <label for="card-cvv">CVV</label>
+            <div class="password-field">
+              <input id="card-cvv" type="password" inputmode="numeric" autocomplete="off" placeholder="123" maxlength="3">
+              <button
+                type="button"
+                class="password-toggle"
+                data-password-toggle="card-cvv"
+                aria-label="Show CVV"
+                aria-pressed="false"
+              >
+                <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.58 10.58A2 2 0 0012 14a2 2 0 001.42-.58"></path><path d="M9.88 5.09A9.77 9.77 0 0112 5c5 0 9.27 3.11 11 7- .08.19-.08.41 0 .6a12.72 12.72 0 01-4.24 5.11"></path><path d="M6.61 6.61A12.24 12.24 0 001 12c1.73 3.89 6 7 11 7a10.8 10.8 0 005.39-1.39"></path></svg>
+                <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+            <div class="field-error" data-error-for="cardcvv"></div>
+          </div>
+        </div>
+        <div class="card-preview-row">
+          <span>Masked payment preview</span>
+          <strong id="card-preview-label">Enter your card details to preview the masked payment method.</strong>
+        </div>
+        <div class="card-sim-status full" id="card-sim-status" aria-live="polite"></div>
+        <div class="card-processing-panel" id="card-processing-panel" hidden>
+          <div class="upi-processing-heading">
+            <h5 id="card-processing-title">Preparing payment</h5>
+            <p>Please keep this page open while your payment is being processed.</p>
+          </div>
+          <div class="upi-processing-steps">
+            <div class="card-processing-step" data-card-step="0">Verifying card details...</div>
+            <div class="card-processing-step" data-card-step="1">Processing payment...</div>
+            <div class="card-processing-step" data-card-step="2">Confirming transaction...</div>
+            <div class="card-processing-step" data-card-step="3">Completing payment...</div>
+          </div>
+        </div>
+        <div class="card-otp-panel" id="card-otp-panel" hidden>
+          <h5>OTP Verification</h5>
+          <p>Enter OTP sent to your registered mobile number.</p>
+          <input id="card-otp-input" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="6">
+          <div class="field-error" id="card-otp-error" aria-live="polite"></div>
+          <button type="button" class="otp-verify-btn" id="card-otp-verify-btn">Verify OTP</button>
+        </div>
+        <div class="card-success-panel" id="card-success-panel" hidden>
+          <h5>Payment Successful</h5>
+          <div class="upi-success-row">
+            <span>Amount paid</span>
+            <strong id="card-success-amount">₹0</strong>
+          </div>
+          <div class="upi-success-row">
+            <span>Paid using</span>
+            <strong id="card-success-masked">Visa ending in 0000</strong>
+          </div>
+          <div class="upi-success-row">
+            <span>Transaction reference</span>
+            <strong id="card-success-reference">CARDTXN000000</strong>
+          </div>
+          <div class="upi-success-row">
+            <span>Paid at</span>
+            <strong id="card-success-time">--</strong>
+          </div>
+        </div>
       </div>
-      <div class="card-sim-status full" id="card-sim-status" aria-live="polite"></div>
     `;
 
     paymentFieldsWrap.appendChild(upiGroup);
     paymentFieldsWrap.appendChild(cardGrid);
     paymentOptions.appendChild(paymentFieldsWrap);
 
-    const cardNumberInput = paymentFieldsWrap.querySelector('#checkout-card-number');
-    const cardHolderInput = paymentFieldsWrap.querySelector('#checkout-card-holder');
-    const expiryInput = paymentFieldsWrap.querySelector('#checkout-card-expiry');
-    const cvvInput = paymentFieldsWrap.querySelector('#checkout-card-cvv');
     upiSimCard = paymentFieldsWrap.querySelector('#upi-sim-card');
     upiQrButton = paymentFieldsWrap.querySelector('#upi-qr-button');
     upiPayableAmountNode = paymentFieldsWrap.querySelector('#upi-payable-amount');
-    upiIdInput = paymentFieldsWrap.querySelector('#checkout-upi-id');
-    upiIdErrorNode = paymentFieldsWrap.querySelector('[data-error-for="upi_id"]');
+    upiIdInput = paymentFieldsWrap.querySelector('#upi-id-input');
+    upiIdErrorNode = paymentFieldsWrap.querySelector('#upi-id-error');
     upiStatusNode = paymentFieldsWrap.querySelector('#upi-sim-status');
+    upiQrStateBadgeNode = paymentFieldsWrap.querySelector('#upi-qr-state-badge');
+    upiQrHintNode = paymentFieldsWrap.querySelector('#upi-qr-hint');
+    upiProcessingPanel = paymentFieldsWrap.querySelector('#upi-processing-panel');
+    upiProcessingTitleNode = paymentFieldsWrap.querySelector('#upi-processing-title');
+    upiProcessingStepNodes = Array.from(paymentFieldsWrap.querySelectorAll('.upi-processing-step'));
+    upiSuccessPanel = paymentFieldsWrap.querySelector('#upi-success-panel');
+    upiSuccessAmountNode = paymentFieldsWrap.querySelector('#upi-success-amount');
+    upiSuccessReferenceNode = paymentFieldsWrap.querySelector('#upi-success-reference');
+    upiSuccessTimeNode = paymentFieldsWrap.querySelector('#upi-success-time');
     cardStatusNode = paymentFieldsWrap.querySelector('#card-sim-status');
+    cardHolderInput = paymentFieldsWrap.querySelector('#card-holder-name');
+    cardNumberInput = paymentFieldsWrap.querySelector('#card-number');
+    cardExpiryInput = paymentFieldsWrap.querySelector('#card-expiry');
+    cardCvvInput = paymentFieldsWrap.querySelector('#card-cvv');
+    cardPreviewNode = paymentFieldsWrap.querySelector('#card-preview-label');
+    cardAmountNode = paymentFieldsWrap.querySelector('#card-payable-amount');
+    cardProcessingPanel = paymentFieldsWrap.querySelector('#card-processing-panel');
+    cardProcessingTitleNode = paymentFieldsWrap.querySelector('#card-processing-title');
+    cardProcessingStepNodes = Array.from(paymentFieldsWrap.querySelectorAll('.card-processing-step'));
+    cardOtpPanel = paymentFieldsWrap.querySelector('#card-otp-panel');
+    cardOtpInput = paymentFieldsWrap.querySelector('#card-otp-input');
+    cardOtpErrorNode = paymentFieldsWrap.querySelector('#card-otp-error');
+    cardOtpVerifyButton = paymentFieldsWrap.querySelector('#card-otp-verify-btn');
+    cardSuccessPanel = paymentFieldsWrap.querySelector('#card-success-panel');
+    cardSuccessAmountNode = paymentFieldsWrap.querySelector('#card-success-amount');
+    cardSuccessMaskedNode = paymentFieldsWrap.querySelector('#card-success-masked');
+    cardSuccessReferenceNode = paymentFieldsWrap.querySelector('#card-success-reference');
+    cardSuccessTimeNode = paymentFieldsWrap.querySelector('#card-success-time');
+
+    paymentFieldsWrap._upiGroup = upiGroup;
+    paymentFieldsWrap._cardGrid = cardGrid;
 
     paymentFields.push(
       {
         type: 'card',
-        element: cardNumberInput,
-        errorNode: paymentFieldsWrap.querySelector('[data-error-for="card_number"]'),
-        sanitize: (value) => value.replace(/\D/g, '').slice(0, 16),
-        format: (value) => value.replace(/(\d{4})(?=\d)/g, '$1 ').trim(),
-        validate: (value) => {
-          const digits = String(value || '').replace(/\D/g, '');
-
-          if (!digits) {
-            return 'Enter valid card number';
-          }
-
-          if (digits.length !== 16) {
-            return 'Enter valid card number';
-          }
-
-          return '';
-        }
-      },
-      {
-        type: 'card',
         element: cardHolderInput,
-        errorNode: paymentFieldsWrap.querySelector('[data-error-for="card_holder"]'),
+        errorNode: paymentFieldsWrap.querySelector('[data-error-for="cardholder"]'),
+        sanitize: sanitizeCardholderName,
         validate: (value) => {
-          const normalized = String(value || '').trim();
+          const normalized = sanitizeCardholderName(value);
 
-          if (!normalized || normalized.length < 2 || !/^[a-zA-Z][a-zA-Z\s'.-]+$/.test(normalized)) {
-            return 'Enter card holder name';
+          if (!normalized) {
+            return 'Cardholder name is required';
+          }
+
+          if (normalized.length < 3) {
+            return 'Enter the full name shown on the card';
           }
 
           return '';
@@ -762,32 +1020,18 @@
       },
       {
         type: 'card',
-        element: expiryInput,
-        errorNode: paymentFieldsWrap.querySelector('[data-error-for="card_expiry"]'),
-        sanitize: (value) => {
-          const digits = value.replace(/\D/g, '').slice(0, 4);
-          return digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
-        },
+        element: cardNumberInput,
+        errorNode: paymentFieldsWrap.querySelector('[data-error-for="cardnumber"]'),
+        sanitize: formatCardNumber,
         validate: (value) => {
-          const normalized = String(value || '').trim();
+          const normalized = sanitizeCardNumber(value);
 
           if (!normalized) {
-            return 'Invalid expiry date';
+            return 'Card number is required';
           }
 
-          if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(normalized)) {
-            return 'Invalid expiry date';
-          }
-
-          const [monthText, yearText] = normalized.split('/');
-          const month = Number(monthText);
-          const year = 2000 + Number(yearText);
-          const now = new Date();
-          const currentMonth = now.getMonth() + 1;
-          const currentYear = now.getFullYear();
-
-          if (year < currentYear || (year === currentYear && month < currentMonth)) {
-            return 'Invalid expiry date';
+          if (normalized.length < 16) {
+            return 'Card number must be 16 digits';
           }
 
           return '';
@@ -795,55 +1039,43 @@
       },
       {
         type: 'card',
-        element: cvvInput,
-        errorNode: paymentFieldsWrap.querySelector('[data-error-for="card_cvv"]'),
-        sanitize: (value) => value.replace(/\D/g, '').slice(0, 3),
+        element: cardExpiryInput,
+        errorNode: paymentFieldsWrap.querySelector('[data-error-for="cardexpiry"]'),
+        sanitize: sanitizeExpiry,
         validate: (value) => {
-          const normalized = String(value || '').trim();
+          const normalized = sanitizeExpiry(value);
 
           if (!normalized) {
-            return 'Enter valid CVV';
+            return 'Expiry date is required';
           }
 
-          if (!/^\d{3}$/.test(normalized)) {
-            return 'Enter valid CVV';
+          if (!isValidExpiry(normalized)) {
+            return 'Enter a valid future expiry date';
+          }
+
+          return '';
+        }
+      },
+      {
+        type: 'card',
+        element: cardCvvInput,
+        errorNode: paymentFieldsWrap.querySelector('[data-error-for="cardcvv"]'),
+        sanitize: sanitizeCvv,
+        validate: (value) => {
+          const normalized = sanitizeCvv(value);
+
+          if (!normalized) {
+            return 'CVV is required';
+          }
+
+          if (normalized.length !== 3) {
+            return 'CVV must be 3 digits';
           }
 
           return '';
         }
       }
     );
-
-    paymentFieldsWrap._upiGroup = upiGroup;
-    paymentFieldsWrap._cardGrid = cardGrid;
-
-    if (upiQrButton) {
-      upiQrButton.addEventListener('click', () => {
-        upiQrScanned = true;
-        upiQrButton.classList.add('is-selected');
-        setUpiIdState(false);
-        setFormMessage('');
-
-        if (upiStatusNode && upiSimulationStatus === 'idle') {
-          upiStatusNode.textContent = 'QR selected for payment.';
-          upiStatusNode.className = 'upi-sim-status';
-        }
-      });
-    }
-
-    if (upiIdInput) {
-      upiIdInput.addEventListener('input', () => {
-        upiIdInput.value = sanitizeUpiId(upiIdInput.value);
-        setUpiIdState(false);
-        setFormMessage('');
-        updateSubmitState();
-      });
-
-      upiIdInput.addEventListener('blur', () => {
-        setUpiIdState(false);
-        updateSubmitState();
-      });
-    }
 
     /*
 
@@ -875,6 +1107,68 @@
     }
   }
 
+  function updateCardPayableAmount(amount = 0) {
+    if (cardAmountNode) {
+      cardAmountNode.textContent = formatPrice(Number(amount) || 0);
+    }
+  }
+
+  function hideCardProcessPanels() {
+    if (cardProcessingPanel) {
+      cardProcessingPanel.hidden = true;
+    }
+
+    if (cardOtpPanel) {
+      cardOtpPanel.hidden = true;
+    }
+
+    if (cardSuccessPanel) {
+      cardSuccessPanel.hidden = true;
+    }
+  }
+
+  function setCardProcessingStage(activeStep, title) {
+    if (cardProcessingTitleNode && title) {
+      cardProcessingTitleNode.textContent = title;
+    }
+
+    cardProcessingStepNodes.forEach((node, index) => {
+      node.classList.remove('is-active', 'is-complete');
+
+      if (index < activeStep) {
+        node.classList.add('is-complete');
+      } else if (index === activeStep) {
+        node.classList.add('is-active');
+      }
+    });
+  }
+
+  function updateCardPreview() {
+    if (cardPreviewNode) {
+      cardPreviewNode.textContent = cardPreviewLabel(cardNumberInput?.value || '');
+    }
+  }
+
+  function clearCardOtpState() {
+    if (cardOtpInput) {
+      cardOtpInput.value = '';
+    }
+
+    if (cardOtpErrorNode) {
+      cardOtpErrorNode.textContent = '';
+    }
+  }
+
+  function storeSimulatedCardPaymentResult(details) {
+    sessionStorage.setItem('cibo_simulated_payment', JSON.stringify({
+      method: 'card',
+      reference: String(details?.reference || ''),
+      amount: Number(details?.amount || 0),
+      paid_at: String(details?.paidAt || ''),
+      masked_card: String(details?.maskedCard || '')
+    }));
+  }
+
   function resetCardSimulation() {
     cardSimulationStatus = 'idle';
 
@@ -888,11 +1182,84 @@
       cardStatusNode.className = 'card-sim-status full';
     }
 
+    hideCardProcessPanels();
+    clearCardOtpState();
+    updateCardPreview();
+
     updatePlaceOrderButton();
   }
 
+  function hideUpiProcessPanels() {
+    if (upiProcessingPanel) {
+      upiProcessingPanel.hidden = true;
+    }
+
+    if (upiSuccessPanel) {
+      upiSuccessPanel.hidden = true;
+    }
+  }
+
+  function setUpiProcessingStage(activeStep, title) {
+    if (upiProcessingTitleNode && title) {
+      upiProcessingTitleNode.textContent = title;
+    }
+
+    upiProcessingStepNodes.forEach((node, index) => {
+      node.classList.remove('is-active', 'is-complete');
+
+      if (index < activeStep) {
+        node.classList.add('is-complete');
+      } else if (index === activeStep) {
+        node.classList.add('is-active');
+      }
+    });
+  }
+
+  function createSimulatedUpiReference() {
+    return 'CIBOUPI' + Math.floor(100000 + Math.random() * 900000);
+  }
+
+  function formatSimulatedPaymentTimestamp() {
+    return new Date().toLocaleString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
+
+  function storeSimulatedPaymentResult(details) {
+    sessionStorage.setItem('cibo_simulated_payment', JSON.stringify({
+      method: 'upi',
+      reference: String(details?.reference || ''),
+      amount: Number(details?.amount || 0),
+      paid_at: String(details?.paidAt || '')
+    }));
+  }
+
+  function setCheckoutInteractionDisabled(disabled) {
+    const controls = Array.from(form.querySelectorAll('input, textarea, select, button'));
+    form.classList.toggle('is-busy', disabled);
+
+    controls.forEach((control) => {
+      if (!(control instanceof HTMLElement)) {
+        return;
+      }
+
+      if (disabled) {
+        control.dataset.wasDisabled = control.disabled ? '1' : '0';
+        control.disabled = true;
+        return;
+      }
+
+      const wasDisabled = control.dataset.wasDisabled === '1';
+      delete control.dataset.wasDisabled;
+      control.disabled = wasDisabled;
+    });
+  }
+
   function resetUpiSimulation() {
-    upiSimulationStatus = 'idle';
     upiQrScanned = false;
 
     if (upiVerificationTimer) {
@@ -900,10 +1267,7 @@
       upiVerificationTimer = null;
     }
 
-    if (upiStatusNode) {
-      upiStatusNode.textContent = getUpiStatusMessage();
-      upiStatusNode.className = 'upi-sim-status';
-    }
+    hideUpiProcessPanels();
 
     if (upiQrButton) {
       upiQrButton.classList.remove('is-selected');
@@ -918,7 +1282,7 @@
       upiIdErrorNode.textContent = '';
     }
 
-    updatePlaceOrderButton();
+    setUpiVisualState('idle');
   }
 
   function clearPaymentField(field) {
@@ -954,28 +1318,27 @@
 
     if (paymentType !== 'upi') {
       resetUpiSimulation();
-    } else if (upiStatusNode) {
-      upiStatusNode.textContent = getUpiStatusMessage();
-      upiStatusNode.className = `upi-sim-status${upiSimulationStatus === 'processing' ? ' is-processing' : ''}${upiSimulationStatus === 'success' ? ' is-success' : ''}`;
+    } else {
+      setUpiVisualState(upiSimulationStatus === 'success' ? 'success' : 'idle');
     }
 
     if (paymentType !== 'card') {
       resetCardSimulation();
     } else if (cardStatusNode) {
+      updateCardPreview();
       cardStatusNode.textContent = getCardStatusMessage();
-      cardStatusNode.className = `card-sim-status full${cardSimulationStatus === 'processing' ? ' is-processing' : ''}${cardSimulationStatus === 'success' ? ' is-success' : ''}`;
+      cardStatusNode.className = `card-sim-status full${cardSimulationStatus === 'processing' ? ' is-processing' : ''}`;
     }
 
     updatePlaceOrderButton();
   }
 
-  function validateForm(options = {}) {
-    const requireUpiSuccess = Boolean(options.requireUpiSuccess);
+  function validateForm() {
     const baseValid = Object.values(fields).every(validateField);
     const paymentType = getSelectedPaymentType();
     const activePaymentFields = paymentFields.filter((field) => field.type === paymentType && field.type !== 'upi');
     const paymentValid = activePaymentFields.every(validateField);
-    const upiValid = paymentType !== 'upi' || !requireUpiSuccess || upiSimulationStatus === 'success';
+    const upiValid = paymentType === 'upi' ? setUpiIdState(true) : true;
 
     return baseValid && paymentValid && upiValid;
   }
@@ -1063,6 +1426,8 @@
     }
 
     if (account && typeof account === 'object') {
+      currentUserEmail = String(account.email || '').trim();
+
       if (!nameInput.value && account.name) {
         nameInput.value = String(account.name);
       }
@@ -1164,7 +1529,10 @@
 
         return `
           <div class="order-item">
-            <span>${escapeHtml(item.name)} x ${quantity}</span>
+            <div class="order-item-main">
+              ${item.image ? `<img class="order-item-thumb" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.imageAlt || item.name)}">` : ''}
+              <span>${escapeHtml(item.name)} x ${quantity}</span>
+            </div>
             <span>${formatPrice(itemTotal)}</span>
           </div>
         `;
@@ -1219,6 +1587,7 @@
     const safeSummary = await loadSummary(items);
     items = getCartItems();
     updateUpiPayableAmount(Number(safeSummary.total) || 0);
+    updateCardPayableAmount(Number(safeSummary.total) || 0);
     let offerMessage = '';
 
     if (safeSummary.promoApplied && Number(safeSummary.discount) > 0) {
@@ -1289,7 +1658,12 @@
 
   async function placeOrder(payload) {
     const serverOrder = await createServerOrder(payload);
-    const orderNumber = String(serverOrder?.order_number || '');
+
+    return completeSuccessfulOrder(serverOrder);
+  }
+
+  function completeSuccessfulOrder(order) {
+    const orderNumber = String(order?.order_number || '');
 
     if (!orderNumber) {
       throw new Error('Order was created, but the confirmation number was missing.');
@@ -1299,6 +1673,52 @@
     clearPlacedOrderState();
     setFormMessage('Order placed successfully. Redirecting...', 'success');
     window.location.href = 'success.php?order=' + encodeURIComponent(orderNumber);
+
+    return order;
+  }
+
+  async function runPrepaidCheckout(payload, paymentType) {
+    if (paymentType === 'upi') {
+      upiSimulationStatus = 'processing';
+
+      if (upiStatusNode) {
+        upiStatusNode.textContent = getUpiStatusMessage();
+        upiStatusNode.className = 'upi-sim-status is-processing';
+      }
+    } else {
+      cardSimulationStatus = 'processing';
+
+      if (cardStatusNode) {
+        cardStatusNode.textContent = getCardStatusMessage();
+        cardStatusNode.className = 'card-sim-status full is-processing';
+      }
+    }
+
+    updateSubmitState();
+
+    try {
+      await placeOrder(payload);
+    } catch (error) {
+      if (paymentType === 'upi' && upiStatusNode) {
+        upiStatusNode.textContent = 'UPI payment was not completed. Your cart is still ready.';
+        upiStatusNode.className = 'upi-sim-status';
+      }
+
+      if (paymentType === 'card' && cardStatusNode) {
+      cardStatusNode.textContent = 'Card payment was not completed. Your cart is still ready.';
+        cardStatusNode.className = 'card-sim-status full';
+      }
+
+      throw error;
+    } finally {
+      if (paymentType === 'upi') {
+        upiSimulationStatus = 'idle';
+      } else {
+        cardSimulationStatus = 'idle';
+      }
+
+      updateSubmitState();
+    }
   }
 
   async function runUpiVerification(payload) {
@@ -1307,39 +1727,101 @@
     }
 
     if (!setUpiIdState(true)) {
-      if (upiStatusNode) {
-        upiStatusNode.textContent = 'Scan QR or enter UPI ID';
-        upiStatusNode.className = 'upi-sim-status';
-      }
-
-      updateSubmitState();
+      setFormMessage('Please enter a valid UPI ID before continuing.', 'error');
       return;
     }
 
-    upiSimulationStatus = 'processing';
+    const orderSummary = readSummary();
+    const totalAmount = Number(orderSummary?.total_amount ?? orderSummary?.total ?? 0) || 0;
 
-    if (upiStatusNode) {
-      upiStatusNode.textContent = getUpiStatusMessage();
-      upiStatusNode.className = 'upi-sim-status is-processing';
+      setUpiVisualState('scanning', {
+        badge: 'Displaying QR',
+        hint: 'Opening the scan experience for your selected UPI app.',
+        status: 'Showing your UPI QR...'
+      });
+    hideUpiProcessPanels();
+    setCheckoutInteractionDisabled(true);
+
+    if (upiProcessingPanel) {
+      upiProcessingPanel.hidden = false;
     }
 
     updateSubmitState();
 
-    await new Promise((resolve) => {
-      upiVerificationTimer = window.setTimeout(resolve, 1500);
-    });
+    try {
+      setUpiProcessingStage(0, 'Displaying QR');
+      await wait(2000);
 
-    upiVerificationTimer = null;
-    upiSimulationStatus = 'success';
+      setUpiVisualState('scanning', {
+        badge: 'Scanning QR',
+        hint: 'Scanning the QR just like a UPI app camera would.',
+        status: 'Scanning UPI QR...'
+      });
+      setUpiProcessingStage(1, 'Scanning UPI QR');
+      await wait(2500);
 
-    if (upiStatusNode) {
-      upiStatusNode.textContent = getUpiStatusMessage();
-      upiStatusNode.className = 'upi-sim-status is-success';
+      setUpiVisualState('processing', {
+        badge: 'Opening app',
+        hint: 'Connecting the QR request to your selected UPI app.',
+        status: 'Connecting to UPI app...'
+      });
+      setUpiProcessingStage(2, 'Connecting to UPI app');
+      await wait(2500);
+
+      setUpiVisualState('processing', {
+        badge: 'Awaiting approval',
+        hint: 'Approve the collect request in your UPI app.',
+        status: 'Waiting for approval...'
+      });
+      setUpiProcessingStage(3, 'Waiting for approval');
+      await wait(5000);
+
+      const simulatedPayment = {
+        reference: createSimulatedUpiReference(),
+        amount: totalAmount,
+        paidAt: formatSimulatedPaymentTimestamp()
+      };
+
+      const serverOrder = await createServerOrder(payload);
+      storeSimulatedPaymentResult(simulatedPayment);
+
+      hideUpiProcessPanels();
+
+      if (upiSuccessPanel) {
+        upiSuccessPanel.hidden = false;
+      }
+
+      if (upiSuccessAmountNode) {
+        upiSuccessAmountNode.textContent = formatPrice(simulatedPayment.amount);
+      }
+
+      if (upiSuccessReferenceNode) {
+        upiSuccessReferenceNode.textContent = simulatedPayment.reference;
+      }
+
+      if (upiSuccessTimeNode) {
+        upiSuccessTimeNode.textContent = simulatedPayment.paidAt;
+      }
+
+      setUpiVisualState('success', {
+        badge: 'Paid',
+        hint: 'Payment approved successfully. Completing your order now.',
+        status: 'UPI payment approved. Redirecting to your order confirmation...'
+      });
+
+      await wait(1600);
+      completeSuccessfulOrder(serverOrder);
+    } catch (error) {
+      setUpiVisualState('idle', {
+        status: 'UPI payment was not completed. Your cart is still ready.'
+      });
+      hideUpiProcessPanels();
+      throw error;
+    } finally {
+      upiSimulationStatus = 'idle';
+      setCheckoutInteractionDisabled(false);
+      updateSubmitState();
     }
-
-    updateSubmitState();
-    await new Promise((resolve) => window.setTimeout(resolve, 450));
-    await placeOrder(payload);
   }
 
   async function runCardVerification(payload) {
@@ -1347,30 +1829,169 @@
       return;
     }
 
+    const cardNumber = sanitizeCardNumber(cardNumberInput?.value || '');
+    const maskedCard = `${detectCardType(cardNumber)} ending in ${cardNumber.slice(-4)}`;
+    const orderSummary = readSummary();
+    const totalAmount = Number(orderSummary?.total_amount ?? orderSummary?.total ?? 0) || 0;
+
     cardSimulationStatus = 'processing';
+    hideCardProcessPanels();
+    clearCardOtpState();
+    setCheckoutInteractionDisabled(true);
+
+    if (cardProcessingPanel) {
+      cardProcessingPanel.hidden = false;
+    }
 
     if (cardStatusNode) {
-      cardStatusNode.textContent = getCardStatusMessage();
+      cardStatusNode.textContent = 'Processing your card payment...';
       cardStatusNode.className = 'card-sim-status full is-processing';
     }
 
     updateSubmitState();
 
-    await new Promise((resolve) => {
-      cardVerificationTimer = window.setTimeout(resolve, 1600);
-    });
+    try {
+      setCardProcessingStage(0, 'Verifying card details');
+      await wait(2000);
+      setCardProcessingStage(1, 'Processing payment');
+      await wait(2500);
+      setCardProcessingStage(2, 'Confirming transaction');
+      await wait(3500);
 
-    cardVerificationTimer = null;
-    cardSimulationStatus = 'success';
+      if (cardProcessingPanel) {
+        cardProcessingPanel.hidden = true;
+      }
 
-    if (cardStatusNode) {
-      cardStatusNode.textContent = getCardStatusMessage();
-      cardStatusNode.className = 'card-sim-status full is-success';
+      if (cardOtpPanel) {
+        cardOtpPanel.hidden = false;
+      }
+
+      setCheckoutInteractionDisabled(false);
+      updateSubmitState();
+
+      if (cardOtpInput) {
+        cardOtpInput.focus();
+      }
+
+      const otpValid = await new Promise((resolve) => {
+        const attemptVerify = () => {
+          const otp = String(cardOtpInput?.value || '').trim();
+
+          if (otp !== '123456') {
+            if (cardOtpErrorNode) {
+              cardOtpErrorNode.textContent = otp === '' ? 'OTP is required' : 'Incorrect OTP. Use demo OTP 123456.';
+            }
+            resolve(false);
+            return;
+          }
+
+          if (cardOtpErrorNode) {
+            cardOtpErrorNode.textContent = '';
+          }
+
+          resolve(true);
+        };
+
+        if (!cardOtpInput) {
+          resolve(false);
+          return;
+        }
+
+        const handleKeydown = (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            cleanup();
+            attemptVerify();
+          }
+        };
+        const handleClick = () => {
+          cleanup();
+          attemptVerify();
+        };
+
+        const cleanup = () => {
+          cardOtpInput.removeEventListener('keydown', handleKeydown);
+          cardOtpVerifyButton?.removeEventListener('click', handleClick);
+        };
+
+        cardOtpInput.addEventListener('keydown', handleKeydown);
+        cardOtpVerifyButton?.addEventListener('click', handleClick);
+      });
+
+      if (!otpValid) {
+        throw new Error('Card payment could not be completed with the provided OTP.');
+      }
+
+      setCheckoutInteractionDisabled(true);
+
+      if (cardOtpPanel) {
+        cardOtpPanel.hidden = true;
+      }
+
+      if (cardProcessingPanel) {
+        cardProcessingPanel.hidden = false;
+      }
+
+      setCardProcessingStage(3, 'Completing payment');
+      await wait(1600);
+
+      const simulatedPayment = {
+        reference: createSimulatedCardReference(),
+        amount: totalAmount,
+        paidAt: formatSimulatedPaymentTimestamp(),
+        maskedCard
+      };
+
+      const serverOrder = await createServerOrder(payload);
+      storeSimulatedCardPaymentResult(simulatedPayment);
+
+      hideCardProcessPanels();
+
+      if (cardSuccessPanel) {
+        cardSuccessPanel.hidden = false;
+      }
+
+      if (cardSuccessAmountNode) {
+        cardSuccessAmountNode.textContent = formatPrice(simulatedPayment.amount);
+      }
+
+      if (cardSuccessMaskedNode) {
+        cardSuccessMaskedNode.textContent = simulatedPayment.maskedCard;
+      }
+
+      if (cardSuccessReferenceNode) {
+        cardSuccessReferenceNode.textContent = simulatedPayment.reference;
+      }
+
+      if (cardSuccessTimeNode) {
+        cardSuccessTimeNode.textContent = simulatedPayment.paidAt;
+      }
+
+      if (cardStatusNode) {
+        cardStatusNode.textContent = 'Simulated card payment approved. Redirecting to your order confirmation...';
+        cardStatusNode.className = 'card-sim-status full is-success';
+      }
+
+      if (cardCvvInput) {
+        cardCvvInput.value = '';
+      }
+
+      await wait(1600);
+      completeSuccessfulOrder(serverOrder);
+    } catch (error) {
+      if (cardStatusNode) {
+        cardStatusNode.textContent = error instanceof Error ? error.message : 'Card payment was not completed. Your cart is still ready.';
+        cardStatusNode.className = 'card-sim-status full';
+      }
+
+      hideCardProcessPanels();
+      throw error;
+    } finally {
+      cardSimulationStatus = 'idle';
+      clearCardOtpState();
+      setCheckoutInteractionDisabled(false);
+      updateSubmitState();
     }
-
-    updateSubmitState();
-    await new Promise((resolve) => window.setTimeout(resolve, 450));
-    await placeOrder(payload);
   }
 
   let refreshedPlaceOrderButton = null;
@@ -1392,6 +2013,23 @@
     accumulator[index] = field;
     return accumulator;
   }, {}));
+
+  if (upiIdInput) {
+    upiIdInput.addEventListener('input', () => {
+      setUpiIdState(false);
+      if (getSelectedPaymentType() === 'upi' && upiSimulationStatus !== 'processing' && upiSimulationStatus !== 'scanning') {
+        setUpiVisualState('idle');
+      }
+      persistCheckoutDraft();
+      updateSubmitState();
+    });
+
+    upiIdInput.addEventListener('blur', () => {
+      setUpiIdState(Boolean(upiIdInput.value.trim()));
+      persistCheckoutDraft();
+      updateSubmitState();
+    });
+  }
 
     paymentInputs.forEach((input) => {
       input.addEventListener('change', () => {
@@ -1447,7 +2085,7 @@
       itemsCount: getCartItems().length
     });
 
-    if (!validateForm({ requireUpiSuccess: false })) {
+    if (!validateForm()) {
       updateSubmitState();
       setFormMessage(paymentType === 'upi'
         ? 'Please correct the highlighted fields before completing payment.'
@@ -1485,6 +2123,7 @@
         slug: item.slug || item.itemSlug || '',
         price: Number(item.price) || 0,
         quantity: Number(item.quantity) || 0,
+        image: item.image || '',
         restaurant: item.restaurant || items[0]?.restaurant || 'Cibo Order',
         restaurantSlug: item.restaurantSlug || items[0]?.restaurantSlug || '',
         restaurantPage: item.restaurantPage || items[0]?.restaurantPage || ''
@@ -1495,12 +2134,12 @@
       orderSubmissionInFlight = true;
       updateSubmitState();
 
-      if (paymentType === 'upi' && upiSimulationStatus !== 'success') {
+      if (paymentType === 'upi') {
         await runUpiVerification(payload);
         return;
       }
 
-      if (paymentType === 'card' && cardSimulationStatus !== 'success') {
+      if (paymentType === 'card') {
         await runCardVerification(payload);
         return;
       }

@@ -1,9 +1,115 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/includes/catalog.php';
+
+$restaurantSlug = trim((string) ($_GET['restaurant'] ?? ''));
+
+if ($restaurantSlug === '' || !cibo_catalog_has_active_restaurant_slug($restaurantSlug)) {
+    header('Location: index.php', true, 302);
+    exit;
+}
+
+$restaurantRecord = null;
+
+foreach (cibo_catalog_fetch_restaurants() as $restaurant) {
+    if (trim((string) ($restaurant['slug'] ?? '')) === $restaurantSlug) {
+        $restaurantRecord = $restaurant;
+        break;
+    }
+}
+
+if (!$restaurantRecord) {
+    header('Location: index.php', true, 302);
+    exit;
+}
+
+$restaurantName = trim((string) ($restaurantRecord['name'] ?? 'Restaurant')) ?: 'Restaurant';
+$restaurantLocation = trim((string) ($restaurantRecord['location'] ?? ''));
+$restaurantRatingMeta = trim((string) ($restaurantRecord['ratingMeta'] ?? ''));
+$restaurantOfferText = trim((string) ($restaurantRecord['offerText'] ?? '')) ?: 'Free delivery on orders above ₹199';
+$restaurantCardImage = trim((string) ($restaurantRecord['image'] ?? ''));
+$restaurantHeroImage = trim((string) ($restaurantRecord['heroImage'] ?? ''));
+
+$normalizedRatingMeta = str_replace(['Ã¢â‚¬Â¢', 'â€¢'], '•', $restaurantRatingMeta);
+$restaurantMetaParts = array_values(array_filter(array_map(
+    static fn (string $part): string => trim($part),
+    explode('•', $normalizedRatingMeta)
+)));
+
+function cibo_menu_h(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function cibo_menu_public_asset_exists(string $path): bool
+{
+    $normalizedPath = ltrim(str_replace('\\', '/', trim($path)), '/');
+
+    if ($normalizedPath === '' || str_contains($normalizedPath, '..')) {
+        return false;
+    }
+
+    $absolutePath = realpath(__DIR__ . '/' . $normalizedPath);
+    $projectRoot = realpath(__DIR__);
+
+    return $absolutePath !== false
+        && $projectRoot !== false
+        && str_starts_with(str_replace('\\', '/', $absolutePath), str_replace('\\', '/', $projectRoot))
+        && is_file($absolutePath);
+}
+
+function cibo_menu_hero_candidates(string $heroImagePath, string $cardImagePath, string $slug): array
+{
+    $candidates = [];
+    $normalizedHeroPath = trim(str_replace('\\', '/', $heroImagePath));
+    $normalizedCardPath = trim(str_replace('\\', '/', $cardImagePath));
+    $cardBaseName = pathinfo($normalizedCardPath, PATHINFO_FILENAME);
+    $normalizedSlug = trim($slug);
+
+    if (
+        $normalizedHeroPath !== ''
+        && (
+            str_contains($normalizedHeroPath, 'images/restaurant-heroes/')
+            || str_contains(pathinfo($normalizedHeroPath, PATHINFO_FILENAME), '-hero')
+        )
+    ) {
+        $candidates[] = $normalizedHeroPath;
+    }
+
+    foreach (array_filter([$cardBaseName, $normalizedSlug]) as $baseName) {
+        foreach (['jpg', 'jpeg', 'png', 'webp', 'gif'] as $extension) {
+            $candidates[] = 'images/restaurant-heroes/' . $baseName . '-hero.' . $extension;
+        }
+    }
+
+    if ($normalizedHeroPath !== '' && $normalizedHeroPath !== $normalizedCardPath) {
+        $candidates[] = $normalizedHeroPath;
+    }
+
+    if ($normalizedCardPath !== '') {
+        $candidates[] = $normalizedCardPath;
+    }
+
+    return array_values(array_unique(array_filter($candidates, static fn (string $candidate): bool => trim($candidate) !== '')));
+}
+
+$restaurantResolvedHeroImage = 'images/hero.jpg';
+
+foreach (cibo_menu_hero_candidates($restaurantHeroImage, $restaurantCardImage, $restaurantSlug) as $candidatePath) {
+    if (cibo_menu_public_asset_exists($candidatePath)) {
+        $restaurantResolvedHeroImage = $candidatePath;
+        break;
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>McDonald's - Cibo</title>
+  <title><?= cibo_menu_h($restaurantName) ?> - Cibo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -19,23 +125,27 @@
     <section class="restaurant-hero-card">
       <div class="restaurant-hero-left">
         <p class="restaurant-breadcrumb">
-          <a href="index.php">Home</a> / McDonald's
+          <a href="index.php">Home</a> / <?= cibo_menu_h($restaurantName) ?>
         </p>
 
-        <h1>McDonald's</h1>
+        <h1><?= cibo_menu_h($restaurantName) ?></h1>
 
         <div class="restaurant-meta">
-          <span>⭐ 4.3</span>
-          <span>25–30 mins</span>
-          <span>Burgers, Fast Food</span>
+          <?php foreach ($restaurantMetaParts as $metaPart): ?>
+            <span><?= cibo_menu_h($metaPart) ?></span>
+          <?php endforeach; ?>
         </div>
 
-        <p class="restaurant-address">JP Nagar</p>
-        <p class="restaurant-offer">Free delivery on orders above ₹199</p>
+        <p class="restaurant-address"><?= cibo_menu_h($restaurantLocation) ?></p>
+        <p class="restaurant-offer"><?= cibo_menu_h($restaurantOfferText) ?></p>
       </div>
 
       <div class="restaurant-hero-right">
-       <img src="images/restaurant-heroes/mcd-hero.jpg" alt="McDonald's hero image"> 
+       <img
+         src="<?= cibo_menu_h($restaurantResolvedHeroImage) ?>"
+         alt="<?= cibo_menu_h($restaurantName) ?> hero image"
+         data-hero-fallback="<?= cibo_menu_h($restaurantCardImage !== '' ? $restaurantCardImage : 'images/hero.jpg') ?>"
+       > 
       </div>
     </section>
 
@@ -202,6 +312,7 @@
   </footer>
   <script src="favorites.js"></script>
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="menu.js"></script>
   <script src="cart-badge.js"></script>
 </body>

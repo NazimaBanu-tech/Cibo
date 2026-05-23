@@ -548,7 +548,8 @@
     </div>
   </footer>
   <script src="auth-display.js"></script>
-  <script src="signup.js"></script>
+  <script src="cart-manager.js"></script>
+  <script src="signup.js?v=non-otp-rollback-1"></script>
   <script src="cart-badge.js"></script>
 </body>
 </html>

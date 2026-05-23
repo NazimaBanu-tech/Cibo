@@ -8,7 +8,7 @@ require_once __DIR__ . '/account.php';
 function cibo_order_status_options(): array
 {
     return [
-        'pending' => 'Pending',
+        'placed' => 'Placed',
         'preparing' => 'Preparing',
         'out_for_delivery' => 'Out for Delivery',
         'delivered' => 'Delivered',
@@ -21,7 +21,7 @@ function cibo_normalize_order_status(string $status): string
     $normalized = strtolower(trim($status));
 
     return match ($normalized) {
-        'placed' => 'pending',
+        'pending' => 'placed',
         'out-for-delivery' => 'out_for_delivery',
         default => $normalized,
     };
@@ -30,7 +30,226 @@ function cibo_normalize_order_status(string $status): string
 function cibo_order_status_label(string $status): string
 {
     $normalized = cibo_normalize_order_status($status);
-    return cibo_order_status_options()[$normalized] ?? 'Pending';
+    return cibo_order_status_options()[$normalized] ?? 'Placed';
+}
+
+function cibo_order_status_transitions(): array
+{
+    return [
+        'placed' => ['preparing', 'cancelled'],
+        'preparing' => ['out_for_delivery'],
+        'out_for_delivery' => ['delivered'],
+        'delivered' => [],
+        'cancelled' => [],
+    ];
+}
+
+function cibo_order_next_statuses(string $status): array
+{
+    $normalized = cibo_normalize_order_status($status);
+    $transitions = cibo_order_status_transitions();
+
+    return $transitions[$normalized] ?? [];
+}
+
+function cibo_order_status_is_final(string $status): bool
+{
+    return cibo_order_next_statuses($status) === [];
+}
+
+function cibo_order_progression_rank(string $status): int
+{
+    $normalized = cibo_normalize_order_status($status);
+    $ranks = [
+        'placed' => 0,
+        'preparing' => 1,
+        'out_for_delivery' => 2,
+        'delivered' => 3,
+        'cancelled' => 4,
+    ];
+
+    return $ranks[$normalized] ?? 0;
+}
+
+function cibo_demo_order_progression_thresholds(): array
+{
+    return [
+        'preparing' => 12,
+        'out_for_delivery' => 24,
+        'delivered' => 36,
+    ];
+}
+
+function cibo_demo_target_order_status_for_elapsed(int $elapsedSeconds): string
+{
+    $elapsedSeconds = max(0, $elapsedSeconds);
+    $thresholds = cibo_demo_order_progression_thresholds();
+
+    if ($elapsedSeconds >= (int) ($thresholds['delivered'] ?? 18)) {
+        return 'delivered';
+    }
+
+    if ($elapsedSeconds >= (int) ($thresholds['out_for_delivery'] ?? 12)) {
+        return 'out_for_delivery';
+    }
+
+    if ($elapsedSeconds >= (int) ($thresholds['preparing'] ?? 6)) {
+        return 'preparing';
+    }
+
+    return 'placed';
+}
+
+function cibo_demo_target_order_status(string $placedAt): string
+{
+    $placedAt = trim($placedAt);
+
+    if ($placedAt === '') {
+        return 'placed';
+    }
+
+    $placedTimestamp = strtotime($placedAt);
+
+    if ($placedTimestamp === false) {
+        return 'placed';
+    }
+
+    return cibo_demo_target_order_status_for_elapsed(time() - $placedTimestamp);
+}
+
+function cibo_order_available_status_options(string $status): array
+{
+    $normalized = cibo_normalize_order_status($status);
+    $options = cibo_order_status_options();
+    $allowedStatuses = array_values(array_unique(array_merge([$normalized], cibo_order_next_statuses($normalized))));
+    $availableOptions = [];
+
+    foreach ($allowedStatuses as $allowedStatus) {
+        if (!isset($options[$allowedStatus])) {
+            continue;
+        }
+
+        $availableOptions[$allowedStatus] = $options[$allowedStatus];
+    }
+
+    return $availableOptions;
+}
+
+function cibo_assert_valid_order_status_transition(string $currentStatus, string $nextStatus): void
+{
+    $current = cibo_normalize_order_status($currentStatus);
+    $next = cibo_normalize_order_status($nextStatus);
+
+    if ($current === $next) {
+        return;
+    }
+
+    $allowedNextStatuses = cibo_order_next_statuses($current);
+
+    if (in_array($next, $allowedNextStatuses, true)) {
+        return;
+    }
+
+    throw new RuntimeException(sprintf(
+        'Invalid order status transition from %s to %s.',
+        cibo_order_status_label($current),
+        cibo_order_status_label($next)
+    ));
+}
+
+function cibo_payment_status_label(string $paymentStatus, string $paymentMethod = ''): string
+{
+    $normalizedStatus = strtolower(trim($paymentStatus));
+    $normalizedMethod = strtolower(trim($paymentMethod));
+
+    if ($normalizedMethod === 'cod' && $normalizedStatus === 'paid') {
+        return 'Paid (COD Collected)';
+    }
+
+    return match ($normalizedStatus) {
+        'paid' => 'Paid',
+        'failed' => 'Failed',
+        default => 'Pending',
+    };
+}
+
+function cibo_payment_method_label(string $paymentMethod): string
+{
+    $normalizedMethod = strtolower(trim($paymentMethod));
+
+    return match ($normalizedMethod) {
+        'cod' => 'Cash on Delivery',
+        'upi' => 'UPI Payment',
+        'card' => 'Card Payment',
+        default => 'Payment',
+    };
+}
+
+function cibo_receipt_signing_key(): string
+{
+    static $key = null;
+
+    if (is_string($key) && $key !== '') {
+        return $key;
+    }
+
+    $seed = implode('|', [
+        __DIR__,
+        CIBO_DB_HOST,
+        (string) CIBO_DB_PORT,
+        CIBO_DB_NAME,
+        CIBO_DB_USER,
+        php_uname('n') ?: 'cibo',
+    ]);
+
+    $key = hash('sha256', $seed);
+    return $key;
+}
+
+function cibo_receipt_token_payload(array $order, ?array $receiptRecord = null): string
+{
+    return implode('|', [
+        (string) ($order['order_number'] ?? ''),
+        (string) ($order['id'] ?? 0),
+        (string) ($receiptRecord['receipt_number'] ?? ''),
+        (string) ($receiptRecord['generated_at'] ?? ''),
+    ]);
+}
+
+function cibo_receipt_token_for_order(array $order, ?array $receiptRecord = null): string
+{
+    return hash_hmac('sha256', cibo_receipt_token_payload($order, $receiptRecord), cibo_receipt_signing_key());
+}
+
+function cibo_receipt_token_is_valid(array $order, ?array $receiptRecord, string $token): bool
+{
+    $safeToken = strtolower(trim($token));
+
+    if (!preg_match('/^[a-f0-9]{64}$/', $safeToken)) {
+        return false;
+    }
+
+    return hash_equals(cibo_receipt_token_for_order($order, $receiptRecord), $safeToken);
+}
+
+function cibo_receipt_url_for_order(array $order, ?array $receiptRecord = null, string $format = 'html'): string
+{
+    $orderNumber = trim((string) ($order['order_number'] ?? ''));
+
+    if ($orderNumber === '') {
+        return '#';
+    }
+
+    $query = [
+        'order' => $orderNumber,
+        'token' => cibo_receipt_token_for_order($order, $receiptRecord),
+    ];
+
+    if (strtolower(trim($format)) === 'pdf') {
+        $query['format'] = 'pdf';
+    }
+
+    return 'receipt.php?' . http_build_query($query);
 }
 
 function cibo_normalize_lookup_value(string $value): string
@@ -48,6 +267,15 @@ function cibo_slugify_value(string $value): string
 
 function cibo_order_debug_log(string $message, array $context = []): void
 {
+    $debugEnabled = filter_var(
+        cibo_setting('CIBO_ENABLE_ORDER_DEBUG', '0'),
+        FILTER_VALIDATE_BOOLEAN
+    );
+
+    if (!$debugEnabled) {
+        return;
+    }
+
     $suffix = $context ? ' ' . json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '';
     error_log('[Cibo Orders] ' . $message . $suffix);
 }
@@ -62,6 +290,16 @@ function cibo_execute_statement_or_fail(mysqli_stmt $statement, string $message)
 function cibo_max_cart_subtotal(): float
 {
     return 10000.0;
+}
+
+function cibo_max_item_quantity_per_order(): int
+{
+    return 5;
+}
+
+function cibo_max_total_items_per_order(): int
+{
+    return 15;
 }
 
 function cibo_threshold_discount_rate(float $subtotal): float
@@ -274,8 +512,8 @@ function cibo_normalize_order_items_payload(array $items): array
             throw new RuntimeException('Each cart item must have a valid quantity.');
         }
 
-        if ($quantity > 20) {
-            throw new RuntimeException('Item quantity is too high for a single order.');
+        if ($quantity > cibo_max_item_quantity_per_order()) {
+            throw new RuntimeException('Max ' . cibo_max_item_quantity_per_order() . ' per item allowed.');
         }
 
         $totalQuantity += $quantity;
@@ -301,12 +539,8 @@ function cibo_normalize_order_items_payload(array $items): array
         throw new RuntimeException('No order items were provided.');
     }
 
-    if (count($normalizedItems) > 25) {
-        throw new RuntimeException('Too many distinct items were sent in one order.');
-    }
-
-    if ($totalQuantity > 50) {
-        throw new RuntimeException('Cart quantity is too high for a single order.');
+    if ($totalQuantity > cibo_max_total_items_per_order()) {
+        throw new RuntimeException('Order limit reached (Max ' . cibo_max_total_items_per_order() . ' items per order).');
     }
 
     return $normalizedItems;
@@ -474,6 +708,7 @@ function cibo_resolve_checkout_payload(array $payload): array
                 'price' => round((float) ($item['price'] ?? 0), 2),
                 'quantity' => (int) ($item['quantity'] ?? 0),
                 'line_total' => round((float) ($item['line_total'] ?? 0), 2),
+                'image' => trim((string) ($item['image'] ?? '')),
             ];
         }, $resolvedItems),
     ];
@@ -660,13 +895,15 @@ function cibo_find_restaurant_id(mysqli $db, array|string $restaurant): int
             }
 
             if ($restaurantName !== '' && $restaurantSlug !== '') {
+                $defaultCategory = 'general';
+                $defaultLocation = 'Bangalore';
                 $insertStatement = $db->prepare('
-                    INSERT INTO restaurants (name, slug, is_active)
-                    VALUES (?, ?, 1)
+                    INSERT INTO restaurants (name, slug, category, cuisine, location, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
                 ');
 
                 if ($insertStatement instanceof mysqli_stmt) {
-                    $insertStatement->bind_param('ss', $restaurantName, $restaurantSlug);
+                    $insertStatement->bind_param('sssss', $restaurantName, $restaurantSlug, $defaultCategory, $defaultCategory, $defaultLocation);
 
                     if ($insertStatement->execute()) {
                         $createdRestaurantId = (int) $insertStatement->insert_id;
@@ -716,7 +953,7 @@ function cibo_find_menu_item_match(mysqli $db, int $restaurantId, array $item): 
 
     if (!array_key_exists($restaurantId, $menuItemsByRestaurant)) {
         $statement = $db->prepare('
-            SELECT id, name, slug, price, is_available
+            SELECT id, name, slug, price, is_available, image
             FROM menu_items
             WHERE restaurant_id = ?
         ');
@@ -808,7 +1045,7 @@ function cibo_ensure_menu_item_for_order(mysqli $db, int $restaurantId, array $i
 
     $imagePath = trim((string) ($item['image_path'] ?? $item['image'] ?? ''));
     $insertStatement = $db->prepare('
-        INSERT INTO menu_items (restaurant_id, name, slug, description, price, food_type, image_path, is_available)
+        INSERT INTO menu_items (restaurant_id, name, slug, description, price, food_type, image, is_available)
         VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     ');
 
@@ -835,6 +1072,7 @@ function cibo_ensure_menu_item_for_order(mysqli $db, int $restaurantId, array $i
         'name' => $itemName,
         'slug' => $candidateSlug,
         'price' => $itemPrice,
+        'image' => $imagePath,
     ];
 }
 
@@ -920,6 +1158,7 @@ function cibo_resolve_order_items(mysqli $db, int $restaurantId, array $items): 
             'price' => round($itemPrice, 2),
             'quantity' => $quantity,
             'line_total' => round($itemPrice * $quantity, 2),
+            'image' => trim((string) ($matchedMenuItem['image'] ?? $item['image_path'] ?? $item['image'] ?? '')),
         ];
     }
 
@@ -937,9 +1176,8 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
     if (!$db) {
         return [];
     }
-    $discountSelect = cibo_order_column_exists($db, 'discount_amount')
-        ? 'o.discount_amount'
-        : '0 AS discount_amount';
+
+    cibo_demo_progress_orders($db);
     $placedAtSelect = cibo_order_column_exists($db, 'placed_at')
         ? 'o.placed_at'
         : 'o.created_at AS placed_at';
@@ -982,11 +1220,11 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
                 o.payment_method,
                 o.payment_status,
                 o.order_status,
-                o.subtotal,
+                o.total_amount AS subtotal,
                 o.delivery_fee,
-                o.tax_amount,
-                {$discountSelect},
-                o.total_amount,
+                o.tax AS tax_amount,
+                o.discount AS discount_amount,
+                o.final_amount AS total_amount,
                 o.created_at,
                 {$placedAtSelect},
                 {$deliveredAtSelect},
@@ -1008,11 +1246,11 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
                 o.payment_method,
                 o.payment_status,
                 o.order_status,
-                o.subtotal,
+                o.total_amount AS subtotal,
                 o.delivery_fee,
-                o.tax_amount,
-                {$discountSelect},
-                o.total_amount,
+                o.tax AS tax_amount,
+                o.discount AS discount_amount,
+                o.final_amount AS total_amount,
                 o.created_at,
                 {$placedAtSelect},
                 {$deliveredAtSelect},
@@ -1047,13 +1285,22 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
     $itemPlaceholders = implode(', ', array_fill(0, count($orderIds), '?'));
     $itemTypes = str_repeat('i', count($orderIds));
     $itemStatement = $db->prepare("
-        SELECT order_id, menu_item_id, item_name, item_price, quantity, line_total
-        FROM order_items
-        WHERE order_id IN ({$itemPlaceholders})
-        ORDER BY id ASC
+        SELECT
+            oi.order_id,
+            oi.menu_item_id,
+            oi.item_name,
+            oi.price AS item_price,
+            oi.quantity,
+            oi.line_total,
+            mi.image
+        FROM order_items oi
+        LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+        WHERE oi.order_id IN ({$itemPlaceholders})
+        ORDER BY oi.id ASC
     ");
 
     $itemsByOrderId = [];
+    $receiptsByOrderId = [];
 
     if ($itemStatement) {
         $itemStatement->bind_param($itemTypes, ...$orderIds);
@@ -1068,15 +1315,39 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
                 'price' => (float) $itemRow['item_price'],
                 'quantity' => (int) $itemRow['quantity'],
                 'line_total' => (float) $itemRow['line_total'],
+                'image' => trim((string) ($itemRow['image'] ?? '')),
             ];
         }
     }
 
-    return array_map(static function (array $order) use ($itemsByOrderId): array {
-        $status = cibo_normalize_order_status((string) ($order['order_status'] ?? 'pending'));
-        $orderId = (int) $order['id'];
+    $receiptPlaceholders = implode(', ', array_fill(0, count($orderIds), '?'));
+    $receiptTypes = str_repeat('i', count($orderIds));
+    $receiptStatement = $db->prepare("
+        SELECT order_id, receipt_number, generated_at
+        FROM receipts
+        WHERE order_id IN ({$receiptPlaceholders})
+    ");
 
-        return [
+    if ($receiptStatement) {
+        $receiptStatement->bind_param($receiptTypes, ...$orderIds);
+        $receiptStatement->execute();
+        $receiptRows = $receiptStatement->get_result()?->fetch_all(MYSQLI_ASSOC) ?? [];
+        $receiptStatement->close();
+
+        foreach ($receiptRows as $receiptRow) {
+            $receiptsByOrderId[(int) $receiptRow['order_id']] = [
+                'receipt_number' => (string) ($receiptRow['receipt_number'] ?? ''),
+                'generated_at' => (string) ($receiptRow['generated_at'] ?? ''),
+            ];
+        }
+    }
+
+    return array_map(static function (array $order) use ($itemsByOrderId, $receiptsByOrderId): array {
+        $status = cibo_normalize_order_status((string) ($order['order_status'] ?? 'placed'));
+        $orderId = (int) $order['id'];
+        $receiptRecord = $receiptsByOrderId[$orderId] ?? null;
+
+        $mappedOrder = [
             'id' => $orderId,
             'order_number' => (string) $order['order_number'],
             'restaurant_id' => isset($order['restaurant_id']) ? (int) $order['restaurant_id'] : 0,
@@ -1085,8 +1356,15 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
             'delivery_address' => (string) $order['delivery_address'],
             'payment_method' => (string) $order['payment_method'],
             'payment_status' => (string) $order['payment_status'],
+            'payment_status_label' => cibo_payment_status_label(
+                (string) $order['payment_status'],
+                (string) $order['payment_method']
+            ),
             'order_status' => $status,
             'order_status_label' => cibo_order_status_label($status),
+            'available_order_statuses' => cibo_order_available_status_options($status),
+            'allowed_next_order_statuses' => cibo_order_next_statuses($status),
+            'is_order_status_locked' => cibo_order_status_is_final($status),
             'restaurant_name' => (string) ($order['restaurant_name'] ?? 'Cibo Order'),
             'subtotal' => (float) $order['subtotal'],
             'delivery_fee' => (float) $order['delivery_fee'],
@@ -1097,7 +1375,14 @@ function cibo_fetch_orders_by_filters(?int $userId = null, array $orderNumbers =
             'placed_at' => $order['placed_at'] ?? $order['created_at'],
             'delivered_at' => $order['delivered_at'] ?? null,
             'items' => $itemsByOrderId[$orderId] ?? [],
+            'receipt_number' => (string) ($receiptRecord['receipt_number'] ?? ''),
+            'receipt_generated_at' => (string) ($receiptRecord['generated_at'] ?? ''),
         ];
+
+        $mappedOrder['receipt_view_url'] = cibo_receipt_url_for_order($mappedOrder, $receiptRecord);
+        $mappedOrder['receipt_download_url'] = cibo_receipt_url_for_order($mappedOrder, $receiptRecord, 'pdf');
+
+        return $mappedOrder;
     }, $orders);
 }
 
@@ -1139,6 +1424,149 @@ function cibo_fetch_order_by_number_for_session(string $orderNumber): ?array
     return null;
 }
 
+function cibo_fetch_order_by_number_public(string $orderNumber): ?array
+{
+    $orderNumber = trim($orderNumber);
+
+    if ($orderNumber === '') {
+        return null;
+    }
+
+    $orders = cibo_fetch_orders_by_filters(null, [$orderNumber]);
+
+    foreach ($orders as $order) {
+        if ((string) ($order['order_number'] ?? '') === $orderNumber) {
+            return $order;
+        }
+    }
+
+    return null;
+}
+
+function cibo_fetch_receipt_record_by_order_id(int $orderId): ?array
+{
+    if ($orderId <= 0) {
+        return null;
+    }
+
+    $db = cibo_db();
+
+    if (!$db) {
+        return null;
+    }
+
+    $statement = $db->prepare('
+        SELECT id, receipt_number, generated_at
+        FROM receipts
+        WHERE order_id = ?
+        LIMIT 1
+    ');
+
+    if (!$statement) {
+        return null;
+    }
+
+    $statement->bind_param('i', $orderId);
+    $statement->execute();
+    $record = $statement->get_result()?->fetch_assoc();
+    $statement->close();
+
+    return $record ?: null;
+}
+
+function cibo_fetch_receipt_context(string $orderNumber, string $token = ''): ?array
+{
+    cibo_start_user_session();
+
+    $orderNumber = trim($orderNumber);
+
+    if ($orderNumber === '') {
+        return null;
+    }
+
+    $currentUser = cibo_current_user();
+    $guestOrders = $_SESSION['session_order_numbers'] ?? [];
+    $hasGuestSessionOrders = is_array($guestOrders) && $guestOrders !== [];
+    $useSessionScope = (int) ($currentUser['id'] ?? 0) > 0 || $hasGuestSessionOrders;
+
+    if ($useSessionScope) {
+        $order = cibo_fetch_order_by_number_for_session($orderNumber);
+    } else {
+        $order = cibo_fetch_order_by_number_public($orderNumber);
+
+        if (!$order) {
+            return null;
+        }
+
+        $receiptRecord = cibo_fetch_receipt_record_by_order_id((int) ($order['id'] ?? 0));
+
+        if (!cibo_receipt_token_is_valid($order, $receiptRecord, $token)) {
+            return null;
+        }
+    }
+
+    if (!$order) {
+        return null;
+    }
+
+    $receiptRecord = cibo_fetch_receipt_record_by_order_id((int) ($order['id'] ?? 0));
+    $subtotal = (float) ($order['subtotal'] ?? 0);
+    $deliveryFee = (float) ($order['delivery_fee'] ?? 0);
+    $taxAmount = (float) ($order['tax_amount'] ?? 0);
+    $discountAmount = (float) ($order['discount_amount'] ?? 0);
+    $totalAmount = (float) ($order['total_amount'] ?? 0);
+    $netBeforeDiscount = $subtotal + $deliveryFee + $taxAmount;
+
+    return [
+        'order' => $order,
+        'receipt' => [
+            'receipt_number' => (string) ($receiptRecord['receipt_number'] ?? ('RCT-' . date('Ymd') . '-' . str_pad((string) ((int) ($order['id'] ?? 0)), 6, '0', STR_PAD_LEFT))),
+            'generated_at' => (string) ($receiptRecord['generated_at'] ?? ($order['created_at'] ?? date('Y-m-d H:i:s'))),
+            'token' => cibo_receipt_token_for_order($order, $receiptRecord),
+        ],
+        'summary' => [
+            'subtotal' => $subtotal,
+            'delivery_fee' => $deliveryFee,
+            'tax_amount' => $taxAmount,
+            'discount_amount' => $discountAmount,
+            'total_amount' => $totalAmount,
+            'net_before_discount' => $netBeforeDiscount,
+        ],
+        'links' => [
+            'view' => cibo_receipt_url_for_order($order, $receiptRecord),
+            'download' => cibo_receipt_url_for_order($order, $receiptRecord, 'pdf'),
+        ],
+    ];
+}
+
+function cibo_order_is_customer_cancellable(array $order): bool
+{
+    return cibo_normalize_order_status((string) ($order['order_status'] ?? '')) === 'placed';
+}
+
+function cibo_cancel_order_for_session(string $orderNumber): array
+{
+    cibo_start_user_session();
+
+    $orderNumber = trim($orderNumber);
+
+    if ($orderNumber === '') {
+        throw new RuntimeException('Unable to find the order.');
+    }
+
+    $order = cibo_fetch_order_by_number_for_session($orderNumber);
+
+    if (!$order) {
+        throw new RuntimeException('Unable to find the order.');
+    }
+
+    if (!cibo_order_is_customer_cancellable($order)) {
+        throw new RuntimeException('Only newly placed orders can be cancelled.');
+    }
+
+    return cibo_update_order_status($orderNumber, 'cancelled');
+}
+
 function cibo_require_owned_address(mysqli $db, int $userId, int $addressId): array
 {
     if ($userId <= 0) {
@@ -1150,7 +1578,7 @@ function cibo_require_owned_address(mysqli $db, int $userId, int $addressId): ar
     }
 
     $statement = $db->prepare('
-        SELECT id, label, full_address, city, state, postal_code, created_at
+        SELECT id, label, recipient_name, recipient_phone, address_line, landmark, city, state, pincode, is_default, created_at
         FROM addresses
         WHERE id = ? AND user_id = ?
         LIMIT 1
@@ -1206,11 +1634,8 @@ function cibo_create_order(array $payload): array
     $db = cibo_app_db();
 
     if (!$db) {
-        throw new CiboHttpException('Order database is not ready yet. Please verify the cibo_db connection.', 500);
+    throw new CiboHttpException('Order database is not ready yet. Please verify the cibo_db_v2 connection.', 500);
     }
-    $hasDiscountAmount = cibo_order_column_exists($db, 'discount_amount');
-    $hasPlacedAt = cibo_order_column_exists($db, 'placed_at');
-
     $items = cibo_normalize_order_items_payload(is_array($payload['items'] ?? null) ? $payload['items'] : []);
     $customer = cibo_validate_customer_details(is_array($payload['customer'] ?? null) ? $payload['customer'] : []);
     $currentUser = cibo_current_user();
@@ -1271,38 +1696,52 @@ function cibo_create_order(array $payload): array
     $db->begin_transaction();
 
     try {
-        $insertColumns = [
-            'user_id',
-            'restaurant_id',
-            'address_id',
-            'order_number',
-            'customer_name',
-            'customer_phone',
-            'delivery_address',
-            'payment_method',
-            'payment_status',
-            'order_status',
-            'subtotal',
-            'delivery_fee',
-            'tax_amount',
-        ];
-        $insertValues = [
-            'NULLIF(?, 0)',
-            '?',
-            'NULLIF(?, 0)',
-            '?',
-            '?',
-            '?',
-            '?',
-            '?',
-            '?',
-            "'pending'",
-            '?',
-            '?',
-            '?',
-        ];
-        $bindTypes = 'iiissssssddd';
-        $bindValues = [
+        $statement = $db->prepare('
+            INSERT INTO orders (
+                user_id,
+                restaurant_id,
+                address_id,
+                order_number,
+                customer_name,
+                customer_phone,
+                delivery_address,
+                total_amount,
+                delivery_fee,
+                discount,
+                tax,
+                final_amount,
+                payment_method,
+                payment_status,
+                order_status,
+                placed_at
+            ) VALUES (
+                NULLIF(?, 0),
+                ?,
+                NULLIF(?, 0),
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                CURRENT_TIMESTAMP
+            )
+        ');
+
+        if (!$statement) {
+            throw new RuntimeException('Unable to create the order.');
+        }
+
+        $normalizedPaymentMethod = strtoupper($paymentMethod);
+        $normalizedOrderStatus = 'placed';
+        $statement->bind_param(
+            'iiissssdddddsss',
             $userId,
             $restaurantId,
             $addressId,
@@ -1310,50 +1749,25 @@ function cibo_create_order(array $payload): array
             $customerName,
             $customerPhone,
             $deliveryAddress,
-            $paymentMethod,
-            $paymentStatus,
             $subtotal,
             $deliveryFee,
+            $discountAmount,
             $taxAmount,
-        ];
-
-        if ($hasDiscountAmount) {
-            $insertColumns[] = 'discount_amount';
-            $insertValues[] = '?';
-            $bindTypes .= 'd';
-            $bindValues[] = $discountAmount;
-        }
-
-        $insertColumns[] = 'total_amount';
-        $insertValues[] = '?';
-        $bindTypes .= 'd';
-        $bindValues[] = $totalAmount;
-
-        if ($hasPlacedAt) {
-            $insertColumns[] = 'placed_at';
-            $insertValues[] = 'CURRENT_TIMESTAMP';
-        }
-
-        $statement = $db->prepare(
-            'INSERT INTO orders (' . implode(', ', $insertColumns) . ')
-             VALUES (' . implode(', ', $insertValues) . ')'
+            $totalAmount,
+            $normalizedPaymentMethod,
+            $paymentStatus,
+            $normalizedOrderStatus
         );
-
-        if (!$statement) {
-            throw new RuntimeException('Unable to create the order.');
-        }
-
-        $statement->bind_param($bindTypes, ...$bindValues);
         cibo_execute_statement_or_fail($statement, 'Unable to create the order.');
         $orderId = (int) $statement->insert_id;
         $statement->close();
 
         $itemStatementWithMenuItem = $db->prepare('
-            INSERT INTO order_items (order_id, menu_item_id, item_name, item_price, quantity, line_total)
+            INSERT INTO order_items (order_id, menu_item_id, item_name, price, quantity, line_total)
             VALUES (?, ?, ?, ?, ?, ?)
         ');
         $itemStatementWithoutMenuItem = $db->prepare('
-            INSERT INTO order_items (order_id, menu_item_id, item_name, item_price, quantity, line_total)
+            INSERT INTO order_items (order_id, menu_item_id, item_name, price, quantity, line_total)
             VALUES (?, NULL, ?, ?, ?, ?)
         ');
 
@@ -1411,6 +1825,20 @@ function cibo_create_order(array $payload): array
             ]);
         }
 
+        $receiptStatement = $db->prepare('
+            INSERT INTO receipts (order_id, receipt_number)
+            VALUES (?, ?)
+        ');
+
+        if (!$receiptStatement) {
+            throw new RuntimeException('Unable to generate the receipt record.');
+        }
+
+        $receiptNumber = 'RCT-' . date('Ymd') . '-' . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
+        $receiptStatement->bind_param('is', $orderId, $receiptNumber);
+        cibo_execute_statement_or_fail($receiptStatement, 'Unable to generate the receipt record.');
+        $receiptStatement->close();
+
         $db->commit();
     } catch (Throwable $exception) {
         $db->rollback();
@@ -1444,37 +1872,42 @@ function cibo_update_order_status(string $orderNumber, string $status): array
     if (!$db) {
         throw new RuntimeException('Order database is not ready yet. Import database/schema.sql first.');
     }
-    $hasDeliveredAt = cibo_order_column_exists($db, 'delivered_at');
 
-    if ($hasDeliveredAt) {
-        if ($status === 'delivered') {
-            $statement = $db->prepare('
-                UPDATE orders
-                SET order_status = ?, delivered_at = CURRENT_TIMESTAMP
-                WHERE order_number = ?
-            ');
-        } else {
-            $statement = $db->prepare('
-                UPDATE orders
-                SET order_status = ?, delivered_at = NULL
-                WHERE order_number = ?
-            ');
+    $orderLookupStatement = $db->prepare('
+        SELECT payment_method
+             , order_status
+        FROM orders
+        WHERE order_number = ?
+        LIMIT 1
+    ');
+
+    if (!$orderLookupStatement) {
+        throw new RuntimeException('Unable to load the order before updating the status.');
+    }
+
+    $orderLookupStatement->bind_param('s', $orderNumber);
+    $orderLookupStatement->execute();
+    $orderRecord = $orderLookupStatement->get_result()?->fetch_assoc();
+    $orderLookupStatement->close();
+
+    if (!$orderRecord) {
+        throw new RuntimeException('Unable to find the order.');
+    }
+
+    $paymentMethod = strtolower(trim((string) ($orderRecord['payment_method'] ?? '')));
+    $currentStatus = cibo_normalize_order_status((string) ($orderRecord['order_status'] ?? 'placed'));
+    cibo_assert_valid_order_status_transition($currentStatus, $status);
+
+    if ($currentStatus === $status) {
+        $existingOrder = cibo_fetch_orders_by_filters(null, [$orderNumber]);
+
+        if (!$existingOrder) {
+            throw new RuntimeException('Unable to load the updated order.');
         }
-    } else {
-        $statement = $db->prepare('
-            UPDATE orders
-            SET order_status = ?
-            WHERE order_number = ?
-        ');
-    }
 
-    if (!$statement) {
-        throw new RuntimeException('Unable to update the order status.');
+        return $existingOrder[0];
     }
-
-    $statement->bind_param('ss', $status, $orderNumber);
-    cibo_execute_statement_or_fail($statement, 'Unable to update the order status.');
-    $statement->close();
+    cibo_apply_order_status_update($db, $orderNumber, $paymentMethod, $status);
 
     $updatedOrder = cibo_fetch_orders_by_filters(null, [$orderNumber]);
 
@@ -1483,6 +1916,141 @@ function cibo_update_order_status(string $orderNumber, string $status): array
     }
 
     return $updatedOrder[0];
+}
+
+function cibo_apply_order_status_update(mysqli $db, string $orderNumber, string $paymentMethod, string $status): void
+{
+    $hasDeliveredAt = cibo_order_column_exists($db, 'delivered_at');
+
+    if ($hasDeliveredAt) {
+        if ($status === 'delivered') {
+            if ($paymentMethod === 'cod') {
+                $statement = $db->prepare('
+                    UPDATE orders
+                    SET order_status = ?, payment_status = ?, delivered_at = CURRENT_TIMESTAMP
+                    WHERE order_number = ?
+                ');
+            } else {
+                $statement = $db->prepare('
+                    UPDATE orders
+                    SET order_status = ?, delivered_at = CURRENT_TIMESTAMP
+                    WHERE order_number = ?
+                ');
+            }
+        } else {
+            if ($paymentMethod === 'cod') {
+                $statement = $db->prepare('
+                    UPDATE orders
+                    SET order_status = ?, payment_status = ?, delivered_at = NULL
+                    WHERE order_number = ?
+                ');
+            } else {
+                $statement = $db->prepare('
+                    UPDATE orders
+                    SET order_status = ?, delivered_at = NULL
+                    WHERE order_number = ?
+                ');
+            }
+        }
+    } else {
+        if ($paymentMethod === 'cod') {
+            $statement = $db->prepare('
+                UPDATE orders
+                SET order_status = ?, payment_status = ?
+                WHERE order_number = ?
+            ');
+        } else {
+            $statement = $db->prepare('
+                UPDATE orders
+                SET order_status = ?
+                WHERE order_number = ?
+            ');
+        }
+    }
+
+    if (!$statement) {
+        throw new RuntimeException('Unable to update the order status.');
+    }
+
+    if ($paymentMethod === 'cod') {
+        $paymentStatus = $status === 'delivered' ? 'paid' : 'pending';
+        $statement->bind_param('sss', $status, $paymentStatus, $orderNumber);
+    } else {
+        $statement->bind_param('ss', $status, $orderNumber);
+    }
+
+    cibo_execute_statement_or_fail($statement, 'Unable to update the order status.');
+    $statement->close();
+}
+
+function cibo_demo_progress_orders(?mysqli $db = null): void
+{
+    static $alreadyRan = false;
+
+    if ($alreadyRan) {
+        return;
+    }
+
+    $alreadyRan = true;
+    $db = $db instanceof mysqli ? $db : cibo_app_db();
+
+    if (!$db instanceof mysqli) {
+        return;
+    }
+
+    $placedAtColumn = cibo_order_column_exists($db, 'placed_at') ? 'placed_at' : 'created_at';
+    $statement = $db->prepare("
+        SELECT order_number,
+               order_status,
+               payment_method,
+               {$placedAtColumn} AS placed_at,
+               TIMESTAMPDIFF(SECOND, {$placedAtColumn}, CURRENT_TIMESTAMP) AS age_seconds
+        FROM orders
+        WHERE order_status IN ('placed', 'preparing', 'out_for_delivery')
+    ");
+
+    if (!$statement) {
+        return;
+    }
+
+    $statement->execute();
+    $orders = $statement->get_result()?->fetch_all(MYSQLI_ASSOC) ?? [];
+    $statement->close();
+
+    foreach ($orders as $order) {
+        $currentStatus = cibo_normalize_order_status((string) ($order['order_status'] ?? 'placed'));
+
+        if ($currentStatus === 'cancelled' || cibo_order_status_is_final($currentStatus)) {
+            continue;
+        }
+
+        $targetStatus = cibo_demo_target_order_status_for_elapsed((int) ($order['age_seconds'] ?? 0));
+
+        if (
+            $targetStatus === $currentStatus
+            || cibo_order_progression_rank($targetStatus) <= cibo_order_progression_rank($currentStatus)
+        ) {
+            continue;
+        }
+
+        $nextStatus = $currentStatus;
+
+        while ($nextStatus !== $targetStatus) {
+            $allowedNextStatuses = cibo_order_next_statuses($nextStatus);
+
+            if (!$allowedNextStatuses) {
+                break;
+            }
+
+            $nextStatus = (string) $allowedNextStatuses[0];
+            cibo_apply_order_status_update(
+                $db,
+                (string) ($order['order_number'] ?? ''),
+                strtolower(trim((string) ($order['payment_method'] ?? ''))),
+                $nextStatus
+            );
+        }
+    }
 }
 
 function cibo_clear_all_orders(): void

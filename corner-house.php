@@ -1,3 +1,10 @@
+<?php
+
+declare(strict_types=1);
+
+header('Location: index.php', true, 302);
+exit;
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -196,6 +203,7 @@
   </footer>
   <script src="favorites.js"></script>
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="menu.js"></script>
   <script src="cart-badge.js"></script>
 </body>

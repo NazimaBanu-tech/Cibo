@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
+const CIBO_ADMIN_LEGACY_BAD_PASSWORD_HASH = '$2y$10$qU64t2lW8jJfHkhGSK1BIe72YIkArvjESMOpZQQINRk.RLlJph52O';
+
 function cibo_admin_login(array $admin): void
 {
     if (session_status() === PHP_SESSION_NONE) {
@@ -95,25 +97,13 @@ function cibo_admin_attempt_login(string $email, string $password): ?string
         return 'Please enter a valid email address.';
     }
 
-    if (
-        strcasecmp($email, CIBO_ADMIN_FALLBACK_EMAIL) === 0
-        && hash_equals(CIBO_ADMIN_FALLBACK_PASSWORD, $password)
-    ) {
-        cibo_admin_login([
-            'id' => 0,
-            'name' => CIBO_ADMIN_FALLBACK_NAME,
-            'email' => CIBO_ADMIN_FALLBACK_EMAIL,
-        ]);
-        return null;
-    }
-
     $db = cibo_db();
 
     if (!$db) {
-        return 'Admin database is not ready yet. Use the default admin credentials or import the database schema first.';
+        return 'Admin database is not ready yet. Import database/schema.sql first.';
     }
 
-    $statement = $db->prepare('SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1');
+    $statement = $db->prepare('SELECT id, name, email, password_hash FROM admin_users WHERE email = ? LIMIT 1');
 
     if (!$statement) {
         return 'Unable to prepare login request.';
@@ -124,6 +114,23 @@ function cibo_admin_attempt_login(string $email, string $password): ?string
     $result = $statement->get_result();
     $admin = $result ? $result->fetch_assoc() : null;
     $statement->close();
+
+    if (
+        $admin
+        && strtolower(trim((string) ($admin['email'] ?? ''))) === CIBO_ADMIN_FALLBACK_EMAIL
+        && (string) ($admin['password_hash'] ?? '') === CIBO_ADMIN_LEGACY_BAD_PASSWORD_HASH
+    ) {
+        $repairedHash = password_hash(CIBO_ADMIN_FALLBACK_PASSWORD, PASSWORD_DEFAULT);
+        $repairStatement = $db->prepare('UPDATE admin_users SET password_hash = ? WHERE id = ? LIMIT 1');
+
+        if ($repairStatement) {
+            $adminId = (int) ($admin['id'] ?? 0);
+            $repairStatement->bind_param('si', $repairedHash, $adminId);
+            $repairStatement->execute();
+            $repairStatement->close();
+            $admin['password_hash'] = $repairedHash;
+        }
+    }
 
     if (!$admin || !password_verify($password, $admin['password_hash'])) {
         return 'Invalid email or password.';

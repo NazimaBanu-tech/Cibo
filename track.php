@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="menu.css">
+  <link rel="stylesheet" href="track.css">
 
   <style>
     .track-page {
@@ -44,7 +45,7 @@
 
     .track-meta {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 28px;
     }
@@ -54,6 +55,25 @@
       border: 1px solid #e7dfd3;
       border-radius: 20px;
       padding: 18px 16px;
+      min-height: 108px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .track-meta-box.is-highlight,
+    .track-meta-box:nth-child(2),
+    .track-meta-box:nth-child(4) {
+      background: linear-gradient(180deg, #f7faf1, #ffffff);
+      border-color: #d7e3c4;
+    }
+
+    .track-meta-box:nth-child(3) {
+      order: 4;
+    }
+
+    .track-meta-box:nth-child(4) {
+      order: 3;
     }
 
     .track-meta-box h4 {
@@ -84,7 +104,7 @@
       left: 12%;
       right: 12%;
       height: 3px;
-      background: #e7dfd3;
+      background: #e8e2d7;
       z-index: 0;
     }
 
@@ -92,6 +112,7 @@
       position: relative;
       z-index: 1;
       text-align: center;
+      transition: opacity 0.28s ease, transform 0.28s ease;
     }
 
     .track-step-dot {
@@ -99,21 +120,28 @@
       height: 46px;
       margin: 0 auto 12px;
       border-radius: 50%;
-      border: 2px solid #d9d0c3;
-      background: white;
-      color: #8a8175;
+      border: 2px solid #ddd6ca;
+      background: #fffdfa;
+      color: #948c80;
       font-size: 18px;
       font-weight: 800;
+      font-family: Arial, Helvetica, sans-serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-feature-settings: "lnum" 1, "tnum" 1;
+      line-height: 1;
       display: flex;
       align-items: center;
       justify-content: center;
+      box-shadow: 0 8px 18px rgba(68, 58, 44, 0.04);
+      transition: background-color 0.28s ease, border-color 0.28s ease, color 0.28s ease, box-shadow 0.28s ease, transform 0.28s ease;
     }
 
     .track-step h3 {
       font-size: 16px;
       font-weight: 800;
-      color: #171715;
+      color: #23201c;
       margin-bottom: 6px;
+      transition: color 0.28s ease;
     }
 
     .track-step p {
@@ -122,17 +150,48 @@
       color: var(--muted);
       max-width: 180px;
       margin: 0 auto;
+      transition: color 0.28s ease;
     }
 
-    .track-step.completed .track-step-dot,
+    .track-step.is-upcoming {
+      opacity: 0.78;
+    }
+
+    .track-step.completed .track-step-dot {
+      background: #f5f8ef;
+      border-color: #d7e3c4;
+      color: #7a8f60;
+      box-shadow: 0 10px 20px rgba(105, 128, 77, 0.07);
+    }
+
+    .track-step.completed h3 {
+      color: #4f6640;
+    }
+
+    .track-step.completed p {
+      color: #6e7368;
+    }
+
+    .track-step.current {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+
     .track-step.current .track-step-dot {
-      background: #eef4e7;
-      border-color: #cfe0b7;
+      background: linear-gradient(180deg, #f2f8ea, #edf5e3);
+      border-color: #bfd39f;
       color: var(--accent);
+      box-shadow:
+        0 0 0 10px rgba(95, 124, 58, 0.06),
+        0 16px 28px rgba(95, 124, 58, 0.11);
     }
 
     .track-step.current h3 {
       color: var(--accent);
+    }
+
+    .track-step.current p {
+      color: #5f6657;
     }
 
     .track-note {
@@ -160,7 +219,7 @@
       font-size: 15px;
       font-weight: 800;
       cursor: pointer;
-      transition: 0.2s ease;
+      transition: background-color 0.22s ease, color 0.22s ease, border-color 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -175,6 +234,8 @@
 
     .track-btn.primary:hover {
       background: #4e682e;
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(78, 104, 46, 0.18);
     }
 
     .track-btn.secondary {
@@ -187,6 +248,100 @@
       background: var(--accent);
       color: white;
       border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(95, 124, 58, 0.12);
+    }
+
+    .track-btn:focus-visible {
+      outline: 3px solid rgba(95, 124, 58, 0.2);
+      outline-offset: 3px;
+    }
+
+    .track-btn[disabled] {
+      opacity: 0.68;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .track-feedback {
+      display: none;
+      max-width: 920px;
+      margin: 18px auto 0;
+      padding: 14px 18px;
+      border-radius: 18px;
+      border: 1px solid #e7dfd3;
+      background: #f6f1e8;
+      color: #5f584f;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .track-feedback.success {
+      color: var(--accent);
+      border-color: #d8e4c4;
+      background: #eef4e7;
+    }
+
+    .track-feedback.error {
+      color: #a84747;
+      border-color: #e4bdb1;
+      background: #fbefea;
+    }
+
+    .track-cancel-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(30, 27, 21, 0.34);
+      backdrop-filter: blur(10px);
+      z-index: 1200;
+    }
+
+    .track-cancel-modal.is-open {
+      display: flex;
+    }
+
+    .track-cancel-dialog {
+      width: min(100%, 420px);
+      background: linear-gradient(180deg, #fffdf9, #fbf8f2);
+      border: 1px solid #e7dfd3;
+      border-radius: 24px;
+      box-shadow: 0 28px 54px rgba(55, 45, 31, 0.16);
+      padding: 24px 22px 20px;
+    }
+
+    .track-cancel-dialog h2 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      font-weight: 800;
+      color: #171715;
+      letter-spacing: -0.03em;
+    }
+
+    .track-cancel-dialog p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #5f584f;
+    }
+
+    .track-cancel-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+    }
+
+    .track-cancel-actions .track-btn {
+      min-width: 140px;
+      height: 46px;
+      border-radius: 14px;
     }
 
     @media (max-width: 900px) {
@@ -204,18 +359,44 @@
         display: none;
       }
     }
+
+    @media (max-width: 560px) {
+      .track-cancel-dialog {
+        padding: 20px 18px 18px;
+        border-radius: 20px;
+      }
+
+      .track-cancel-actions {
+        flex-direction: column-reverse;
+      }
+
+      .track-cancel-actions .track-btn {
+        width: 100%;
+        min-width: 0;
+      }
+    }
   </style>
   <link rel="stylesheet" href="global.css">
 </head>
 <body>
 
-  <?php include 'header.php'; ?>
+<?php
+require_once __DIR__ . '/includes/orders.php';
+
+cibo_start_user_session();
+
+$trackOrderNumber = trim((string) ($_GET['order'] ?? ($_SESSION['last_order_number'] ?? '')));
+$trackReceiptContext = $trackOrderNumber !== '' ? cibo_fetch_receipt_context($trackOrderNumber) : null;
+$trackReceiptViewUrl = (string) ($trackReceiptContext['links']['view'] ?? '');
+$trackReceiptDownloadUrl = (string) ($trackReceiptContext['links']['download'] ?? '');
+include 'header.php';
+?>
 
   <main class="track-page">
     <section class="track-card">
       <h1>Track Your Order</h1>
       <p class="track-subtext">
-        Your order is moving smoothly through the kitchen and will be on its way soon. Current status is highlighted below.
+        Follow the live order status from the restaurant to your doorstep. The latest backend update is highlighted below.
       </p>
 
       <div class="track-meta">
@@ -225,11 +406,16 @@
         </div>
         <div class="track-meta-box">
           <h4>Current Status</h4>
-          <p id="track-status-label">Pending</p>
+          <p id="track-status-label">--</p>
         </div>
         <div class="track-meta-box">
           <h4>Estimated Delivery</h4>
-          <p id="track-delivery-time">25-30 mins</p>
+          <p id="track-delivery-time">Estimated delivery: 25–35 min</p>
+        </div>
+
+        <div class="track-meta-box">
+          <h4>Payment Status</h4>
+          <p id="track-payment-status">--</p>
         </div>
       </div>
 
@@ -260,12 +446,28 @@
       </div>
 
       <div class="track-actions">
-        <button type="button" class="track-btn primary" id="mark-delivered-btn" style="display: none;">Mark as Delivered</button>
         <a href="index.php" class="track-btn primary">Back to Home</a>
         <a href="menu.php" class="track-btn secondary">Order Again</a>
+        <button type="button" class="track-btn secondary" id="track-cancel-button" style="display: none;">Cancel Order</button>
+        <?php if ($trackReceiptViewUrl !== '' && $trackReceiptDownloadUrl !== ''): ?>
+          <a href="<?= htmlspecialchars($trackReceiptViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="track-btn secondary">View Receipt</a>
+          <a href="<?= htmlspecialchars($trackReceiptDownloadUrl, ENT_QUOTES, 'UTF-8') ?>" class="track-btn secondary">Download PDF</a>
+        <?php endif; ?>
       </div>
+      <div class="track-feedback" id="track-feedback" aria-live="polite"></div>
     </section>
   </main>
+
+  <div class="track-cancel-modal" id="track-cancel-modal" aria-hidden="true">
+    <div class="track-cancel-dialog" role="dialog" aria-modal="true" aria-labelledby="track-cancel-title" aria-describedby="track-cancel-copy">
+      <h2 id="track-cancel-title">Cancel Order?</h2>
+      <p id="track-cancel-copy">This order will stop its delivery journey immediately if it is still newly placed. You can keep the order active if you want the demo flow to continue.</p>
+      <div class="track-cancel-actions">
+        <button type="button" class="track-btn secondary" id="track-cancel-keep">Keep Order</button>
+        <button type="button" class="track-btn primary" id="track-cancel-confirm">Confirm Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <footer class="footer">
     <div class="footer-main">
@@ -309,6 +511,7 @@
   </footer>
   <script src="order-api.js"></script>
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="track.js"></script>
   <script src="cart-badge.js"></script>
 </body>

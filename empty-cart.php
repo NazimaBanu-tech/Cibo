@@ -209,6 +209,7 @@
   </footer>
 
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="cart-badge.js"></script>
 </body>
 </html>

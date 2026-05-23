@@ -134,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </form>
 
       <div class="login-help">
-        Use the default admin credentials:
+        Demo admin access:
         <strong>admin@cibo.local</strong>
         /
         <strong>cibo123</strong>

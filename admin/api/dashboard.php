@@ -16,6 +16,7 @@ $orders = cibo_admin_fetch_orders();
 cibo_json_response([
     'success' => true,
     'stats' => cibo_admin_dashboard_stats($orders),
+    'sales_report' => cibo_admin_sales_report(),
     'restaurants' => cibo_admin_fetch_restaurants(),
     'menu_items' => cibo_admin_fetch_menu_items(),
     'orders' => $orders,

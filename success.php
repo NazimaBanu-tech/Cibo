@@ -1,3 +1,15 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/includes/orders.php';
+
+cibo_start_user_session();
+
+$successOrderNumber = trim((string) ($_GET['order'] ?? ($_SESSION['last_order_number'] ?? '')));
+$successReceiptContext = $successOrderNumber !== '' ? cibo_fetch_receipt_context($successOrderNumber) : null;
+$successReceiptViewUrl = (string) ($successReceiptContext['links']['view'] ?? '#');
+$successReceiptDownloadUrl = (string) ($successReceiptContext['links']['download'] ?? '#');
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -101,6 +113,71 @@
       margin-bottom: 28px;
     }
 
+    .success-order-preview {
+      display: none;
+      text-align: left;
+      background: white;
+      border: 1px solid #e7dfd3;
+      border-radius: 20px;
+      padding: 18px;
+      margin-bottom: 28px;
+    }
+
+    .success-order-preview.active {
+      display: block;
+    }
+
+    .success-order-preview h3 {
+      font-size: 18px;
+      font-weight: 800;
+      color: #171715;
+      margin-bottom: 14px;
+    }
+
+    .success-order-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #eee5d9;
+    }
+
+    .success-order-item:last-child {
+      border-bottom: none;
+    }
+
+    .success-order-item-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .success-order-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+      object-fit: cover;
+      background: #f6f1e8;
+      flex-shrink: 0;
+      display: block;
+    }
+
+    .success-order-copy strong {
+      display: block;
+      font-size: 15px;
+      font-weight: 800;
+      color: #171715;
+      margin-bottom: 4px;
+    }
+
+    .success-order-copy span {
+      font-size: 14px;
+      color: #6f685f;
+    }
+
     .success-actions {
       display: flex;
       justify-content: center;
@@ -115,7 +192,7 @@
       font-size: 15px;
       font-weight: 800;
       cursor: pointer;
-      transition: 0.2s ease;
+      transition: background-color 0.22s ease, color 0.22s ease, border-color 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -130,6 +207,8 @@
 
     .success-btn.primary:hover {
       background: #4e682e;
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(78, 104, 46, 0.18);
     }
 
     .success-btn.secondary {
@@ -142,6 +221,13 @@
       background: var(--accent);
       color: white;
       border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(95, 124, 58, 0.12);
+    }
+
+    .success-btn:focus-visible {
+      outline: 3px solid rgba(95, 124, 58, 0.2);
+      outline-offset: 3px;
     }
 
     @media (max-width: 900px) {
@@ -215,9 +301,15 @@
         A confirmation message has been sent to your registered number. You can continue exploring restaurants and order more of your favourites anytime.
       </div>
 
+      <div class="success-order-preview" id="success-order-preview">
+        <h3>Order Items</h3>
+      </div>
+
       <div class="success-actions">
         <a href="index.php" class="success-btn primary">Back to Home</a>
         <a href="track.php" class="success-btn secondary" id="track-order-link">Track Order</a>
+        <a href="<?= htmlspecialchars($successReceiptViewUrl, ENT_QUOTES, 'UTF-8') ?>" class="success-btn secondary" id="view-receipt-link">View Receipt</a>
+        <a href="<?= htmlspecialchars($successReceiptDownloadUrl, ENT_QUOTES, 'UTF-8') ?>" class="success-btn secondary" id="download-receipt-link">Download PDF</a>
       </div>
 
     </section>
@@ -273,12 +365,24 @@
       const paymentMethodNode = document.getElementById('success-payment-method');
       const paymentStatusNode = document.getElementById('success-order-total');
       const noteNode = document.getElementById('success-note');
+      const orderPreviewNode = document.getElementById('success-order-preview');
       const trackLink = document.getElementById('track-order-link');
+      const viewReceiptLink = document.getElementById('view-receipt-link');
+      const downloadReceiptLink = document.getElementById('download-receipt-link');
       const params = new URLSearchParams(window.location.search);
       const orderNumber = params.get('order') || '';
 
       function formatPrice(amount) {
         return '\u20B9' + (Number(amount) || 0);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
 
       function getPaymentMethodLabel(method) {
@@ -299,12 +403,6 @@
         return 'Payment';
       }
 
-      function getPaymentStatusLabel(method) {
-        return String(method || '').trim().toLowerCase() === 'cod'
-          ? 'Pending'
-          : 'Paid Successfully \u2713';
-      }
-
       if (trackLink && orderNumber) {
         trackLink.href = 'track.php?order=' + encodeURIComponent(orderNumber);
       }
@@ -321,8 +419,17 @@
         .then((response) => {
           const order = response.order || {};
           const paymentMethod = String(order.payment_method || '').trim().toLowerCase();
-          const isCod = paymentMethod === 'cod';
+          const paymentStatus = String(order.payment_status || '').trim();
+          const paymentStatusLabel = String(order.payment_status_label || paymentStatus || '--').trim() || '--';
           const totalAmount = Number(order.total_amount) || 0;
+
+          if (viewReceiptLink && order.receipt_view_url) {
+            viewReceiptLink.href = String(order.receipt_view_url);
+          }
+
+          if (downloadReceiptLink && order.receipt_download_url) {
+            downloadReceiptLink.href = String(order.receipt_download_url);
+          }
 
           if (orderIdNode) {
             orderIdNode.textContent = '#' + String(order.order_number || '--');
@@ -333,16 +440,36 @@
           }
 
           if (paymentStatusNode) {
-            paymentStatusNode.textContent = getPaymentStatusLabel(paymentMethod);
+            paymentStatusNode.textContent = paymentStatusLabel;
           }
 
-          if (false) {
-            totalNode.textContent = '₹' + (Number(order.total_amount) || 0);
+          const items = Array.isArray(order.items) ? order.items : [];
+
+          if (orderPreviewNode && items.length) {
+            orderPreviewNode.classList.add('active');
+            orderPreviewNode.innerHTML = `
+              <h3>Order Items</h3>
+              ${items.map((item) => {
+                const quantity = Number(item.quantity) || 1;
+                const lineTotal = Number(item.line_total) || ((Number(item.price) || 0) * quantity);
+
+                return `
+                  <div class="success-order-item">
+                    <div class="success-order-item-main">
+                      ${item.image ? `<img class="success-order-thumb" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name || 'Item')}">` : ''}
+                      <div class="success-order-copy">
+                        <strong>${escapeHtml(item.name || 'Item')}</strong>
+                        <span>Qty: ${quantity}</span>
+                      </div>
+                    </div>
+                    <span>${formatPrice(lineTotal)}</span>
+                  </div>
+                `;
+              }).join('')}
+            `;
           }
-          if (noteNode && isCod) {
-            noteNode.textContent = `${getPaymentMethodLabel(paymentMethod)}. Pay ${formatPrice(totalAmount)} at delivery.`;
-          } else if (noteNode) {
-            noteNode.textContent = `${getPaymentMethodLabel(paymentMethod)}. Amount Paid: ${formatPrice(totalAmount)}.`;
+          if (noteNode) {
+            noteNode.textContent = `${getPaymentMethodLabel(paymentMethod)}. Payment Status: ${paymentStatusLabel}. Order Total: ${formatPrice(totalAmount)}.`;
           }
         })
         .catch(() => null);

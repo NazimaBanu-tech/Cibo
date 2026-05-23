@@ -8,23 +8,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const DEFAULT_RESTAURANTS = [
-    { name: "McDonald's", href: 'menu.php', category: 'burgers', cuisines: 'Burgers, Fast Food', location: 'Rajajinagar' },
-    { name: 'Burger King', href: 'burgerking.php', category: 'burgers', cuisines: 'Burgers, Fast Food', location: 'Koramangala' },
-    { name: "Domino's", href: 'dominos.php', category: 'pizza', cuisines: 'Pizza, Fast Food', location: 'BTM Layout' },
-    { name: 'Pizza Hut', href: 'pizza-hut.php', category: 'pizza', cuisines: 'Pizza, Italian', location: 'Jayanagar' },
-    { name: 'Meghana Foods', href: 'meghana.php', category: 'biryani', cuisines: 'Biryani, Andhra', location: 'Indiranagar' },
-    { name: 'Paradise', href: 'paradise.php', category: 'biryani', cuisines: 'Biryani, Mughlai', location: 'MG Road' },
-    { name: 'Chinese Wok', href: 'chinese-wok.php', category: 'chinese', cuisines: 'Chinese, Asian', location: 'HSR Layout' },
-    { name: 'Mainland China', href: 'mainland-china.php', category: 'chinese', cuisines: 'Chinese, Asian', location: 'Church Street' },
-    { name: 'Empire', href: 'empire.php', category: 'north indian', cuisines: 'North Indian, Kebabs', location: 'Kammanahalli' },
-    { name: 'Punjab Grill', href: 'punjab-grill.php', category: 'north indian', cuisines: 'North Indian, Punjabi', location: 'Whitefield' },
-    { name: 'Udupi', href: 'udupi.php', category: 'south indian', cuisines: 'South Indian, Breakfast', location: 'Basavanagudi' },
-    { name: 'Vidyarthi Bhavan', href: 'vidyarthi.php', category: 'south indian', cuisines: 'South Indian, Dosa', location: 'Basavanagudi' },
-    { name: 'Polar Bear', href: 'polar-bear.php', category: 'desserts', cuisines: 'Desserts, Ice Cream', location: 'Malleshwaram' },
-    { name: 'Corner House', href: 'corner-house.php', category: 'desserts', cuisines: 'Desserts, Sundaes', location: 'Indiranagar' },
-    { name: 'FreshMenu', href: 'freshmenu.php', category: 'salad', cuisines: 'Healthy, Salads', location: 'Bellandur' },
-    { name: 'EatFit', href: 'eatfit.php', category: 'salad', cuisines: 'Healthy, Salads', location: 'Koramangala' },
-    { name: 'Hae Kum Gang', href: 'hae-kum-gang.php', category: 'korean', cuisines: 'Korean, Asian', location: 'Residency Road' }
+    { name: "McDonald's", href: 'menu.php?restaurant=mcdonalds', category: 'burgers', cuisines: 'Burgers, Fast Food', location: 'Rajajinagar' },
+    { name: 'Burger King', href: 'menu.php?restaurant=burger-king', category: 'burgers', cuisines: 'Burgers, Fast Food', location: 'Koramangala' },
+    { name: "Domino's", href: 'menu.php?restaurant=dominos', category: 'pizza', cuisines: 'Pizza, Fast Food', location: 'BTM Layout' },
+    { name: 'Pizza Hut', href: 'menu.php?restaurant=pizza-hut', category: 'pizza', cuisines: 'Pizza, Italian', location: 'Jayanagar' },
+    { name: 'Meghana Foods', href: 'menu.php?restaurant=meghana', category: 'biryani', cuisines: 'Biryani, Andhra', location: 'Indiranagar' },
+    { name: 'Paradise', href: 'menu.php?restaurant=paradise', category: 'biryani', cuisines: 'Biryani, Mughlai', location: 'MG Road' },
+    { name: 'Chinese Wok', href: 'menu.php?restaurant=chinese-wok', category: 'chinese', cuisines: 'Chinese, Asian', location: 'HSR Layout' },
+    { name: 'Mainland China', href: 'menu.php?restaurant=mainland-china', category: 'chinese', cuisines: 'Chinese, Asian', location: 'Church Street' },
+    { name: 'Empire', href: 'menu.php?restaurant=empire', category: 'north indian', cuisines: 'North Indian, Kebabs', location: 'Kammanahalli' },
+    { name: 'Punjab Grill', href: 'menu.php?restaurant=punjab-grill', category: 'north indian', cuisines: 'North Indian, Punjabi', location: 'Whitefield' },
+    { name: 'Udupi', href: 'menu.php?restaurant=udupi', category: 'south indian', cuisines: 'South Indian, Breakfast', location: 'Basavanagudi' },
+    { name: 'Vidyarthi Bhavan', href: 'menu.php?restaurant=vidyarthi', category: 'south indian', cuisines: 'South Indian, Dosa', location: 'Basavanagudi' },
+    { name: 'Polar Bear', href: 'menu.php?restaurant=polar-bear', category: 'desserts', cuisines: 'Desserts, Ice Cream', location: 'Malleshwaram' },
+    { name: 'Corner House', href: 'menu.php?restaurant=corner-house', category: 'desserts', cuisines: 'Desserts, Sundaes', location: 'Indiranagar' },
+    { name: 'FreshMenu', href: 'menu.php?restaurant=freshmenu', category: 'salad', cuisines: 'Healthy, Salads', location: 'Bellandur' },
+    { name: 'EatFit', href: 'menu.php?restaurant=eatfit', category: 'salad', cuisines: 'Healthy, Salads', location: 'Koramangala' },
+    { name: 'Hae Kum Gang', href: 'menu.php?restaurant=hae-kum-gang', category: 'korean', cuisines: 'Korean, Asian', location: 'Residency Road' }
   ];
 
   const searchResults = document.createElement('div');
@@ -72,6 +72,17 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/^-+|-+$/g, '');
   }
 
+  function buildRestaurantHref(restaurant) {
+    const explicitHref = String(restaurant?.href || '').trim();
+
+    if (explicitHref !== '' && !/^[a-z0-9-]+\.php$/i.test(explicitHref)) {
+      return explicitHref;
+    }
+
+    const slug = slugify(restaurant?.slug || restaurant?.name || explicitHref.replace(/\.php$/i, ''));
+    return `menu.php?restaurant=${encodeURIComponent(slug)}`;
+  }
+
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -94,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const slug = slugify(restaurant?.slug || restaurant?.name || restaurant?.href || name);
     const cuisines = String(restaurant?.cuisines || '').trim();
     const category = normalize(restaurant?.category || cuisines.split(',')[0] || 'food');
-    const href = String(restaurant?.href || '').trim() || `${slug}.php`;
+    const href = buildRestaurantHref({ ...restaurant, slug, name });
     const image = String(restaurant?.image || '').trim();
     const heroImage = String(restaurant?.heroImage || '').trim();
 
@@ -132,10 +143,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const metaParts = Array.from(document.querySelectorAll('.restaurant-meta span')).map((item) => item.textContent.trim());
     const cuisines = metaParts.find((part) => /[a-z]/i.test(part) && !/\d/.test(part.replace(/[^\d]/g, ''))) || '';
     const pathname = window.location.pathname.split('/').pop() || '';
+    const query = window.location.search || '';
 
     return {
       name: heroTitle.textContent.trim(),
-      href: pathname,
+      href: pathname + query,
       image: '',
       heroImage: document.querySelector('.restaurant-hero-right img')?.getAttribute('src') || '',
       cuisines,

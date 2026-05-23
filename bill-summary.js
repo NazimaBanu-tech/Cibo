@@ -1,11 +1,11 @@
 (() => {
-  const STORAGE_KEY = 'cibo_cart';
   const SUMMARY_KEY = 'cibo_summary';
   const PROMO_KEY = 'cibo_promo';
   const ORDER_CONTEXT_KEY = 'cibo_order_context';
   const RESTAURANTS_KEY = 'restaurants';
   const MENU_ITEMS_KEY = 'menuItems';
   const GST_RATE = 0.05;
+  const cartManager = window.CiboCartManager;
   let isFirstTimeCustomerCache = true;
 
   function readJSON(key, fallback) {
@@ -175,32 +175,19 @@
   }
 
   function getCartItems() {
-    const cart = readJSON(STORAGE_KEY, {});
-    const safeCart = cart && typeof cart === 'object' ? cart : {};
-    return Object.values(safeCart).filter((item) => Number(item?.quantity) > 0);
+    return cartManager ? cartManager.getItems() : [];
   }
 
   function saveCartItems(cartItems) {
-    const nextCart = (Array.isArray(cartItems) ? cartItems : []).reduce((cart, item, index) => {
-      const quantity = Number(item?.quantity) || 0;
-      const key = String(item?.id || item?.menuItemId || item?.slug || ('item-' + index)).trim();
+    if (!cartManager) {
+      return [];
+    }
 
-      if (!key || quantity <= 0) {
-        return cart;
-      }
+    const result = cartManager.setCart(Array.isArray(cartItems) ? cartItems : [], {
+      source: 'bill-summary'
+    });
 
-      cart[key] = {
-        ...item,
-        id: key,
-        quantity
-      };
-
-      return cart;
-    }, {});
-
-    writeJSON(STORAGE_KEY, nextCart);
-    window.dispatchEvent(new Event('cibo-cart-updated'));
-    return Object.values(nextCart);
+    return result.status === 'ok' ? result.items : cartManager.getItems();
   }
 
   async function fetchCanonicalCatalog() {

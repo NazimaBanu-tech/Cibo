@@ -1,5 +1,4 @@
 (() => {
-  const STORAGE_KEY = 'cibo_cart';
   const CART_NOTICE_KEY = 'cibo_cart_notice';
   const SUMMARY_KEY = 'cibo_summary';
   const PROMO_KEY = 'cibo_promo';
@@ -9,6 +8,7 @@
   const MAX_ORDER_ITEMS = 15;
   const ORDER_LIMIT_MESSAGE = `Order limit reached (Max ${MAX_ORDER_ITEMS} items per order)`;
   const DEFAULT_SUMMARY_NOTE = 'Your order is eligible for secure checkout and will be delivered with care.';
+  const cartManager = window.CiboCartManager;
   const PROMO_SUGGESTIONS = [
     { code: 'CIBO50', description: '₹50 OFF for first-time users' },
     { code: 'CIBO100', description: '₹100 OFF for orders above ₹500' },
@@ -27,8 +27,9 @@
   const clearCartModal = document.getElementById('clear-cart-modal');
   const cancelClearCartButton = document.getElementById('cancel-clear-cart');
   const confirmClearCartButton = document.getElementById('confirm-clear-cart');
+  const cartToastRegion = document.querySelector('[data-cart-toast-region]');
 
-  let cartNoticeTimer = null;
+  let toastHideTimer = null;
   let promoInput = null;
   let promoSuggestions = null;
   let promoFeedback = null;
@@ -50,70 +51,8 @@
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  function sanitizeCart(cart) {
-    const safeCart = cart && typeof cart === 'object' ? cart : {};
-    let didChange = false;
-    let totalItems = 0;
-
-    Object.keys(safeCart).forEach((itemId) => {
-      const item = safeCart[itemId];
-      let quantity = Number(item?.quantity) || 0;
-
-      if (quantity <= 0) {
-        delete safeCart[itemId];
-        didChange = true;
-        return;
-      }
-
-      if (quantity > MAX_ITEM_QUANTITY) {
-        quantity = MAX_ITEM_QUANTITY;
-        safeCart[itemId] = {
-          ...item,
-          quantity
-        };
-        didChange = true;
-      }
-
-      const remainingSlots = MAX_ORDER_ITEMS - totalItems;
-
-      if (remainingSlots <= 0) {
-        delete safeCart[itemId];
-        didChange = true;
-        return;
-      }
-
-      if (quantity > remainingSlots) {
-        quantity = remainingSlots;
-        safeCart[itemId] = {
-          ...safeCart[itemId],
-          quantity
-        };
-        didChange = true;
-      }
-
-      totalItems += quantity;
-    });
-
-    return {
-      cart: safeCart,
-      didChange
-    };
-  }
-
   function readCart() {
-    const parsedCart = readJSON(STORAGE_KEY, {});
-    const { cart, didChange } = sanitizeCart(parsedCart);
-
-    if (didChange) {
-      writeJSON(STORAGE_KEY, cart);
-    }
-
-    return cart;
-  }
-
-  function saveCart(cart) {
-    writeJSON(STORAGE_KEY, sanitizeCart(cart).cart);
-    window.dispatchEvent(new Event('cibo-cart-updated'));
+    return cartManager ? cartManager.getCart() : {};
   }
 
   function getCartItems() {
@@ -121,7 +60,7 @@
   }
 
   function getTotalCartItems(cart) {
-    return Object.values(cart).reduce((total, item) => total + (Number(item?.quantity) || 0), 0);
+    return Object.values(cart || {}).reduce((total, item) => total + (Number(item?.quantity) || 0), 0);
   }
 
   function readPromoState() {
@@ -171,16 +110,23 @@
 
   function readCartNotice() {
     const notice = readJSON(CART_NOTICE_KEY, null);
-    return notice && typeof notice.message === 'string' ? notice : null;
+    return notice && typeof notice.message === 'string'
+      ? {
+          message: notice.message,
+          type: ['info', 'success', 'warning', 'error'].includes(notice.type) ? notice.type : 'warning',
+          createdAt: Number(notice.createdAt) || Date.now()
+        }
+      : null;
   }
 
-  function setCartNotice(messageText) {
+  function setCartNotice(messageText, type = 'warning') {
     if (!messageText) {
       return;
     }
 
     writeJSON(CART_NOTICE_KEY, {
       message: messageText,
+      type,
       createdAt: Date.now()
     });
     window.dispatchEvent(new Event('cibo-cart-notice-updated'));
@@ -191,19 +137,77 @@
     window.dispatchEvent(new Event('cibo-cart-notice-updated'));
   }
 
-  function scheduleCartNoticeClear() {
-    if (cartNoticeTimer) {
-      window.clearTimeout(cartNoticeTimer);
+  function getNoticeMeta(type) {
+    switch (type) {
+      case 'success':
+        return { title: 'Updated', icon: 'OK' };
+      case 'error':
+        return { title: 'Could not update', icon: '!' };
+      case 'info':
+        return { title: 'Cart update', icon: 'i' };
+      case 'warning':
+      default:
+        return { title: 'Limit reached', icon: '!' };
+    }
+  }
+
+  function renderCartToast() {
+    if (!cartToastRegion) {
+      return;
     }
 
-    cartNoticeTimer = window.setTimeout(() => {
+    const cartNotice = readCartNotice();
+
+    if (toastHideTimer) {
+      window.clearTimeout(toastHideTimer);
+      toastHideTimer = null;
+    }
+
+    if (!cartNotice) {
+      cartToastRegion.innerHTML = '';
+      return;
+    }
+
+    const meta = getNoticeMeta(cartNotice.type);
+    const liveMode = cartNotice.type === 'error' ? 'assertive' : 'polite';
+
+    cartToastRegion.setAttribute('aria-live', liveMode);
+    cartToastRegion.innerHTML = `
+      <section class="cart-toast" data-type="${escapeHtml(cartNotice.type)}" role="status" aria-live="${liveMode}" aria-atomic="true">
+        <div class="cart-toast-icon" aria-hidden="true">${escapeHtml(meta.icon)}</div>
+        <div class="cart-toast-copy">
+          <strong class="cart-toast-title">${escapeHtml(meta.title)}</strong>
+          <p class="cart-toast-message">${escapeHtml(cartNotice.message)}</p>
+        </div>
+        <button class="cart-toast-dismiss" type="button" aria-label="Dismiss cart message">&times;</button>
+      </section>
+    `;
+
+    const toastElement = cartToastRegion.querySelector('.cart-toast');
+    const dismissButton = cartToastRegion.querySelector('.cart-toast-dismiss');
+
+    if (toastElement) {
+      window.requestAnimationFrame(() => {
+        toastElement.classList.add('is-visible');
+      });
+    }
+
+    dismissButton?.addEventListener('click', () => {
       clearCartNotice();
-      cartNoticeTimer = null;
-    }, 2200);
+    }, { once: true });
+
+    const timeoutMs = cartNotice.type === 'error' ? 4200 : 3200;
+
+    toastHideTimer = window.setTimeout(() => {
+      clearCartNotice();
+      toastHideTimer = null;
+    }, timeoutMs);
   }
 
   function setEmptyState() {
-    saveCart({});
+    cartManager?.clearCart({
+      source: 'cart-empty-state'
+    });
     localStorage.removeItem(SUMMARY_KEY);
     clearPromoState();
     window.location.href = 'empty-cart.php';
@@ -461,14 +465,6 @@
 
     const restaurantName = items[0].restaurant || 'Cibo Order';
     const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-    const cartNotice = readCartNotice();
-    const cartNoticeMarkup = cartNotice
-      ? `
-        <div class="cart-limit-message" role="status" aria-live="polite" style="margin: 0 0 14px; padding: 10px 12px; border-radius: 14px; background: #fff4e8; color: #b85b13; font-size: 13px; font-weight: 600; line-height: 1.4;">
-          ${escapeHtml(cartNotice.message)}
-        </div>
-      `
-      : '';
 
     if (cartHeaderTitle) {
       cartHeaderTitle.textContent = 'Your Cart';
@@ -479,7 +475,6 @@
     }
 
     cartMainCard.innerHTML = `
-      ${cartNoticeMarkup}
       <div class="cart-restaurant">
         <div>
           <h3>${escapeHtml(restaurantName)}</h3>
@@ -534,10 +529,6 @@
       }).join('')}
     `;
 
-    if (cartNotice) {
-      scheduleCartNoticeClear();
-    }
-
     calculateBillSummary();
   }
 
@@ -572,8 +563,7 @@
 
     event.preventDefault();
 
-    const cart = readCart();
-    const item = cart[cartItem.dataset.id];
+    const item = cartManager?.getItem(cartItem.dataset.id);
 
     if (!item) {
       renderCart();
@@ -582,35 +572,42 @@
 
     if (actionTrigger.dataset.action === 'increase') {
       if (Number(item.quantity || 0) >= MAX_ITEM_QUANTITY) {
-        setCartNotice('Max 5 per item allowed');
+        setCartNotice('Item quantity limit reached. You can add up to 5 of this item.', 'warning');
         renderCart();
         return;
       }
 
-      if (getTotalCartItems(cart) >= MAX_ORDER_ITEMS) {
-        setCartNotice(ORDER_LIMIT_MESSAGE);
+      if ((cartManager?.getCartCount() || 0) >= MAX_ORDER_ITEMS) {
+        setCartNotice(ORDER_LIMIT_MESSAGE, 'warning');
         renderCart();
         return;
       }
-
-      item.quantity = Number(item.quantity || 0) + 1;
     }
 
-    if (actionTrigger.dataset.action === 'decrease') {
-      item.quantity = Number(item.quantity || 0) - 1;
+    let result = null;
+
+    if (actionTrigger.dataset.action === 'increase') {
+      result = cartManager?.updateQuantity(item.id, Number(item.quantity || 0) + 1, item, {
+        source: 'cart-increase'
+      });
+    } else if (actionTrigger.dataset.action === 'decrease') {
+      result = cartManager?.updateQuantity(item.id, Number(item.quantity || 0) - 1, item, {
+        source: 'cart-decrease'
+      });
+    } else if (actionTrigger.dataset.action === 'remove') {
+      result = cartManager?.removeItem(item.id, {
+        source: 'cart-remove'
+      });
     }
 
-    if (actionTrigger.dataset.action === 'remove' || item.quantity <= 0) {
-      delete cart[cartItem.dataset.id];
-    } else {
-      cart[cartItem.dataset.id] = item;
+    if (result?.status === 'item_limit' || result?.status === 'order_limit') {
+      setCartNotice(result.message, 'warning');
     }
 
-    saveCart(cart);
     renderCart();
   });
 
-  window.addEventListener('cibo-cart-notice-updated', renderCart);
+  window.addEventListener('cibo-cart-notice-updated', renderCartToast);
   window.addEventListener('cibo-cart-updated', renderCart);
   window.addEventListener('cibo-bill-summary-updated', () => {
     if (getCartItems().length) {
@@ -621,14 +618,14 @@
     const removedCount = Number(event?.detail?.removedCount || 0);
     setCartNotice(removedCount > 0
       ? 'Your cart was updated to match the latest menu.'
-      : 'Your cart prices were refreshed.');
+      : 'Your cart prices were refreshed.', removedCount > 0 ? 'warning' : 'info');
     renderCart();
   });
   window.addEventListener('cibo-bill-summary-error', (event) => {
     const message = String(event?.detail?.message || '').trim();
 
     if (message) {
-      setCartNotice(message);
+      setCartNotice(message, 'error');
       renderCart();
     }
   });
@@ -666,6 +663,7 @@
     .catch(() => null)
     .finally(() => {
       renderCart();
+      renderCartToast();
       syncBillSummary();
     });
 })();

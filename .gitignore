@@ -42,6 +42,17 @@ temp/
 *.swp
 .codex-temp-edge/
 admin/.codex-temp-edge/
+.codex-tmp/
+.edge-profile/
+.edge-profile2/
+
+# Document/editor generated artifacts
+~$*.docx
+docs/tmp/
+docs/report_render/
+
+# Local generated outputs
+/receipt-*.pdf
 
 # Archives and exports
 *.zip

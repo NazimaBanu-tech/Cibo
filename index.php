@@ -1,3 +1,42 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/includes/catalog.php';
+
+function cibo_homepage_restaurant_slug(string $value): string
+{
+    $value = strtolower(trim($value));
+    $value = preg_replace('/[^a-z0-9]+/', '-', $value) ?? '';
+    return trim($value, '-');
+}
+
+function cibo_homepage_restaurant_href(string $restaurantName): string
+{
+    static $restaurantHrefMap = null;
+
+    if (!is_array($restaurantHrefMap)) {
+        $restaurantHrefMap = [];
+
+        foreach (cibo_catalog_fetch_restaurants() as $restaurant) {
+            $name = strtolower(trim((string) ($restaurant['name'] ?? '')));
+            $href = trim((string) ($restaurant['href'] ?? ''));
+
+            if ($name !== '' && $href !== '') {
+                $restaurantHrefMap[$name] = $href;
+            }
+        }
+    }
+
+    $normalizedName = strtolower(trim($restaurantName));
+
+    if ($normalizedName !== '' && isset($restaurantHrefMap[$normalizedName])) {
+        return $restaurantHrefMap[$normalizedName];
+    }
+
+    return 'menu.php?restaurant=' . rawurlencode(cibo_homepage_restaurant_slug($restaurantName));
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -773,8 +812,8 @@
   <!-- HERO -->
   <div class="hero">
     <div class="hero-content">
-      <h1>Discover the best food & drinks</h1>
-      <p>Order from your favourite restaurants near you</p>
+      <h1>Order from trusted restaurants near you</h1>
+      <p>Browse menus, place your order, and track every step in one clean Cibo flow.</p>
     </div>
   </div>
 
@@ -859,7 +898,7 @@
 
     <div class="restaurants">
 
-      <a href="menu.php" class="restaurant-card" data-category="burgers">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href("McDonald's"), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="burgers">
         <img src="images/restaurants/mcd.jpg" alt="McDonald's">
         <div class="card-content">
           <h3>McDonald's</h3>
@@ -869,7 +908,7 @@
         </div>
       </a>
 
-      <a href="./burgerking.php" class="restaurant-card" data-category="burgers">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Burger King'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="burgers">
         <img src="images/restaurants/burger-king.jpg" alt="Burger King">
         <div class="card-content">
           <h3>Burger King</h3>
@@ -879,7 +918,7 @@
         </div>
       </a>
 
-      <a href="dominos.php" class="restaurant-card" data-category="pizza">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href("Domino's"), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="pizza">
         <img src="images/restaurants/dominos.jpg" alt="Domino's">
         <div class="card-content">
           <h3>Domino's</h3>
@@ -889,7 +928,7 @@
         </div>
       </a>
 
-      <a href="pizza-hut.php" class="restaurant-card" data-category="pizza">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Pizza Hut'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="pizza">
         <img src="images/restaurants/pizza-hut.jpg" alt="Pizza Hut">
         <div class="card-content">
           <h3>Pizza Hut</h3>
@@ -899,7 +938,7 @@
         </div>
       </a>
 
-      <a href="meghana.php" class="restaurant-card" data-category="biryani">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Meghana Foods'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="biryani">
         <img src="images/restaurants/meghana.jpg" alt="Meghana Foods">
         <div class="card-content">
           <h3>Meghana Foods</h3>
@@ -909,7 +948,7 @@
         </div>
       </a>
 
-      <a href="paradise.php" class="restaurant-card" data-category="biryani">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Paradise'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="biryani">
         <img src="images/restaurants/paradise.jpg" alt="Paradise">
         <div class="card-content">
           <h3>Paradise</h3>
@@ -919,7 +958,7 @@
         </div>
       </a>
 
-      <a href="chinese-wok.php" class="restaurant-card" data-category="chinese">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Chinese Wok'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="chinese">
         <img src="images/restaurants/chinese-wok.jpg" alt="Chinese Wok">
         <div class="card-content">
           <h3>Chinese Wok</h3>
@@ -929,7 +968,7 @@
         </div>
       </a>
 
-      <a href="mainland-china.php" class="restaurant-card" data-category="chinese">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Mainland China'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="chinese">
         <img src="images/restaurants/mainland-china.jpg" alt="Mainland China">
         <div class="card-content">
           <h3>Mainland China</h3>
@@ -939,7 +978,7 @@
         </div>
       </a>
 
-      <a href="empire.php" class="restaurant-card" data-category="north indian">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Empire'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="north indian">
         <img src="images/restaurants/empire.jpg" alt="Empire">
         <div class="card-content">
           <h3>Empire</h3>
@@ -949,7 +988,7 @@
         </div>
       </a>
 
-      <a href="punjab-grill.php" class="restaurant-card" data-category="north indian">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Punjab Grill'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="north indian">
         <img src="images/restaurants/punjab-grill.jpg" alt="Punjab Grill">
         <div class="card-content">
           <h3>Punjab Grill</h3>
@@ -959,7 +998,7 @@
         </div>
       </a>
 
-      <a href="udupi.php" class="restaurant-card" data-category="south indian">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Udupi'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="south indian">
         <img src="images/restaurants/udupi.jpg" alt="Udupi">
         <div class="card-content">
           <h3>Udupi</h3>
@@ -969,7 +1008,7 @@
         </div>
       </a>
 
-      <a href="vidyarthi.php" class="restaurant-card" data-category="south indian">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Vidyarthi Bhavan'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="south indian">
         <img src="images/restaurants/vidyarthi.jpg" alt="Vidyarthi Bhavan">
         <div class="card-content">
           <h3>Vidyarthi Bhavan</h3>
@@ -979,7 +1018,7 @@
         </div>
       </a>
 
-      <a href="polar-bear.php" class="restaurant-card" data-category="desserts">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Polar Bear'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="desserts">
         <img src="images/restaurants/polar-bear.jpg" alt="Polar Bear">
         <div class="card-content">
           <h3>Polar Bear</h3>
@@ -989,7 +1028,7 @@
         </div>
       </a>
 
-      <a href="corner-house.php" class="restaurant-card" data-category="desserts">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Corner House'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="desserts">
         <img src="images/restaurants/corner-house.jpg" alt="Corner House">
         <div class="card-content">
           <h3>Corner House</h3>
@@ -999,7 +1038,7 @@
         </div>
       </a>
 
-      <a href="freshmenu.php" class="restaurant-card" data-category="salad">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('FreshMenu'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="salad">
         <img src="images/restaurants/freshmenu.jpg" alt="FreshMenu">
         <div class="card-content">
           <h3>FreshMenu</h3>
@@ -1009,7 +1048,7 @@
         </div>
       </a>
 
-      <a href="eatfit.php" class="restaurant-card" data-category="salad">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('EatFit'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="salad">
         <img src="images/restaurants/eatfit.jpg" alt="EatFit">
         <div class="card-content">
           <h3>EatFit</h3>
@@ -1019,7 +1058,7 @@
         </div>
       </a>
 
-      <a href="hae-kum-gang.php" class="restaurant-card" data-category="korean">
+      <a href="<?= htmlspecialchars(cibo_homepage_restaurant_href('Hae Kum Gang'), ENT_QUOTES, 'UTF-8') ?>" class="restaurant-card" data-category="korean">
         <img src="images/restaurants/hae-kum-gang.jpg" alt="Hae Kum Gang">
         <div class="card-content">
           <h3>Hae Kum Gang</h3>
@@ -1096,6 +1135,7 @@
     </div>
   </footer>
   <script src="auth-display.js"></script>
+  <script src="cart-manager.js"></script>
   <script src="index.js"></script>
   <script src="cart-badge.js"></script>
 </body>

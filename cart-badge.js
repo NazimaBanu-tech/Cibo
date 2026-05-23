@@ -1,20 +1,10 @@
 (() => {
-  const STORAGE_KEY = 'cibo_cart';
   const CART_TEXT = 'cart';
   const ADMIN_HREF = 'admin/login.php';
-
-  function readCart() {
-    try {
-      const savedCart = localStorage.getItem(STORAGE_KEY);
-      const parsedCart = savedCart ? JSON.parse(savedCart) : {};
-      return parsedCart && typeof parsedCart === 'object' ? parsedCart : {};
-    } catch (error) {
-      return {};
-    }
-  }
+  const cartManager = window.CiboCartManager;
 
   function getCartCount() {
-    return Object.values(readCart()).reduce((total, item) => total + (Number(item.quantity) || 0), 0);
+    return cartManager ? cartManager.getCartCount() : 0;
   }
 
   function getCartTargets() {
@@ -103,12 +93,6 @@
       }
     });
   }
-
-  window.addEventListener('storage', (event) => {
-    if (event.key === STORAGE_KEY) {
-      renderCartCount();
-    }
-  });
 
   window.addEventListener('cibo-cart-updated', renderCartCount);
 
